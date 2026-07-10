@@ -1,0 +1,699 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Input,
+  Label,
+  Select,
+  StatCard,
+  StatusBadge,
+  Textarea,
+} from "@/components/ui";
+import { formatTime, hoursBetween, round } from "@/lib/utils";
+
+/* ---------------- Types ---------------- */
+type DayStatus = "COMPLETED" | "IN_PROGRESS" | "BLOCKED";
+
+interface SerializedProject {
+  id: string;
+  name: string;
+}
+
+interface SerializedWorkEntry {
+  id: string;
+  dailyLogId: string;
+  projectId: string;
+  taskDescription: string;
+  hoursWorked: number;
+  project?: { id: string; name: string } | null;
+}
+
+type BreakType = "LUNCH" | "SHORT" | "OTHER";
+
+interface SerializedBreak {
+  id: string;
+  dailyLogId: string;
+  type: BreakType;
+  startAt: string;
+  endAt: string | null;
+}
+
+interface SerializedLog {
+  id: string;
+  userId: string;
+  date: string;
+  loginAt: string | null;
+  logoutAt: string | null;
+  plannedWork: string | null;
+  workCompleted: string | null;
+  status: DayStatus | null;
+  remarks: string | null;
+  workEntries: SerializedWorkEntry[];
+  breaks: SerializedBreak[];
+}
+
+const BREAK_LABELS: Record<BreakType, string> = {
+  LUNCH: "Lunch",
+  SHORT: "Short break",
+  OTHER: "Other",
+};
+
+interface EntryRow {
+  key: string;
+  projectId: string;
+  taskDescription: string;
+  hoursWorked: string;
+}
+
+function rowKey() {
+  return Math.random().toString(36).slice(2);
+}
+
+function entriesToRows(entries: SerializedWorkEntry[]): EntryRow[] {
+  if (!entries.length) return [blankRow()];
+  return entries.map((e) => ({
+    key: rowKey(),
+    projectId: e.projectId,
+    taskDescription: e.taskDescription,
+    hoursWorked: String(e.hoursWorked),
+  }));
+}
+
+function blankRow(): EntryRow {
+  return { key: rowKey(), projectId: "", taskDescription: "", hoursWorked: "" };
+}
+
+/* ---------------- Component ---------------- */
+export function DashboardClient({
+  initialLog,
+  projects,
+  userName,
+}: {
+  initialLog: SerializedLog | null;
+  projects: SerializedProject[];
+  userName: string;
+}) {
+  const [log, setLog] = useState<SerializedLog | null>(initialLog);
+
+  // Login form
+  const [plannedWork, setPlannedWork] = useState(initialLog?.plannedWork ?? "");
+  const [loginPending, setLoginPending] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  // Entries
+  const [rows, setRows] = useState<EntryRow[]>(
+    entriesToRows(initialLog?.workEntries ?? [])
+  );
+  const [entriesPending, setEntriesPending] = useState(false);
+  const [entriesError, setEntriesError] = useState<string | null>(null);
+  const [entriesSaved, setEntriesSaved] = useState(false);
+
+  // Logout form
+  const [workCompleted, setWorkCompleted] = useState(
+    initialLog?.workCompleted ?? ""
+  );
+  const [status, setStatus] = useState<DayStatus>(
+    initialLog?.status ?? "IN_PROGRESS"
+  );
+  const [remarks, setRemarks] = useState(initialLog?.remarks ?? "");
+  const [logoutPending, setLogoutPending] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+
+  // Breaks
+  const [breakType, setBreakType] = useState<BreakType>("LUNCH");
+  const [breakPending, setBreakPending] = useState(false);
+  const [breakError, setBreakError] = useState<string | null>(null);
+
+  // Reminder banner
+  const [reminderDismissed, setReminderDismissed] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const isLoggedIn = !!log?.loginAt;
+  const isLoggedOut = !!log?.logoutAt;
+
+  const savedEntriesCount = log?.workEntries.length ?? 0;
+
+  const totalHours = useMemo(
+    () =>
+      round(
+        rows.reduce((sum, r) => {
+          const h = parseFloat(r.hoursWorked);
+          return sum + (Number.isFinite(h) && h > 0 ? h : 0);
+        }, 0)
+      ),
+    [rows]
+  );
+
+  const savedTotalHours = useMemo(
+    () =>
+      round(
+        (log?.workEntries ?? []).reduce((s, e) => s + (e.hoursWorked || 0), 0)
+      ),
+    [log]
+  );
+
+  const hoursSinceLogin = useMemo(() => {
+    if (!log?.loginAt || log.logoutAt) return 0;
+    return hoursBetween(log.loginAt, new Date(now));
+  }, [log, now]);
+
+  const breaks = log?.breaks ?? [];
+  const openBreak = useMemo(() => breaks.find((b) => b.endAt === null) ?? null, [breaks]);
+  const onBreak = !!openBreak;
+
+  const totalBreakHours = useMemo(() => {
+    return round(
+      breaks.reduce((sum, b) => {
+        const end = b.endAt ? new Date(b.endAt) : new Date(now);
+        return sum + hoursBetween(b.startAt, end);
+      }, 0)
+    );
+  }, [breaks, now]);
+
+  // Net active presence = login duration minus break time (only when logged out).
+  const netActiveHours = useMemo(() => {
+    if (!log?.loginAt) return 0;
+    const end = log.logoutAt ? new Date(log.logoutAt) : new Date(now);
+    return round(Math.max(0, hoursBetween(log.loginAt, end) - totalBreakHours));
+  }, [log, now, totalBreakHours]);
+
+  const showReminder =
+    isLoggedIn && !isLoggedOut && hoursSinceLogin > 8 && !reminderDismissed;
+
+  async function toggleBreak() {
+    setBreakPending(true);
+    setBreakError(null);
+    try {
+      const res = await fetch("/api/daily-log/break", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: breakType }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to update break");
+      setLog(data.log);
+    } catch (err) {
+      setBreakError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setBreakPending(false);
+    }
+  }
+
+  const today = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  /* ---------------- Mutations ---------------- */
+  async function markLogin() {
+    setLoginPending(true);
+    setLoginError(null);
+    try {
+      const res = await fetch("/api/daily-log/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ plannedWork }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to mark login");
+      setLog(data.log);
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setLoginPending(false);
+    }
+  }
+
+  async function saveEntries() {
+    setEntriesPending(true);
+    setEntriesError(null);
+    setEntriesSaved(false);
+    try {
+      const entries = rows
+        .filter((r) => r.projectId && parseFloat(r.hoursWorked) > 0)
+        .map((r) => ({
+          projectId: r.projectId,
+          taskDescription: r.taskDescription,
+          hoursWorked: parseFloat(r.hoursWorked),
+        }));
+      const res = await fetch("/api/daily-log/entries", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ entries }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save entries");
+      setLog(data.log);
+      setRows(entriesToRows(data.log?.workEntries ?? []));
+      setEntriesSaved(true);
+      setTimeout(() => setEntriesSaved(false), 3000);
+    } catch (err) {
+      setEntriesError(
+        err instanceof Error ? err.message : "Something went wrong"
+      );
+    } finally {
+      setEntriesPending(false);
+    }
+  }
+
+  async function markLogout() {
+    setLogoutPending(true);
+    setLogoutError(null);
+    try {
+      const res = await fetch("/api/daily-log/logout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workCompleted, status, remarks }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to mark logout");
+      setLog(data.log);
+    } catch (err) {
+      setLogoutError(
+        err instanceof Error ? err.message : "Something went wrong"
+      );
+    } finally {
+      setLogoutPending(false);
+    }
+  }
+
+  /* ---------------- Row helpers ---------------- */
+  function updateRow(key: string, patch: Partial<EntryRow>) {
+    setRows((prev) =>
+      prev.map((r) => (r.key === key ? { ...r, ...patch } : r))
+    );
+  }
+  function addRow() {
+    setRows((prev) => [...prev, blankRow()]);
+  }
+  function removeRow(key: string) {
+    setRows((prev) => {
+      const next = prev.filter((r) => r.key !== key);
+      return next.length ? next : [blankRow()];
+    });
+  }
+
+  /* ---------------- Render ---------------- */
+  return (
+    <div className="mx-auto max-w-5xl space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold">Good day, {userName}</h1>
+        <p className="text-sm text-muted-foreground">{today}</p>
+      </div>
+
+      {/* Reminder banner */}
+      {showReminder && (
+        <div className="flex items-start justify-between gap-4 rounded-lg border border-[hsl(var(--warning))]/40 bg-[hsl(var(--warning))]/10 px-4 py-3 text-sm">
+          <p className="text-[hsl(var(--warning))]">
+            ⏰ You&apos;ve been logged in for {round(hoursSinceLogin)} hours —
+            don&apos;t forget to Mark Logout.
+          </p>
+          <button
+            onClick={() => setReminderDismissed(true)}
+            className="shrink-0 text-[hsl(var(--warning))] hover:opacity-70"
+            aria-label="Dismiss reminder"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Status strip */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
+        <StatCard
+          label="Login Time"
+          value={formatTime(log?.loginAt)}
+          tone={isLoggedIn ? "success" : "default"}
+        />
+        <StatCard
+          label="Logout Time"
+          value={formatTime(log?.logoutAt)}
+          tone={isLoggedOut ? "success" : "default"}
+        />
+        <StatCard
+          label="Logged Hours"
+          value={savedTotalHours}
+          hint={`${savedEntriesCount} ${
+            savedEntriesCount === 1 ? "entry" : "entries"
+          }`}
+        />
+        <StatCard
+          label="Break Time"
+          value={`${totalBreakHours} h`}
+          hint={`${breaks.length} ${breaks.length === 1 ? "break" : "breaks"}`}
+          tone={onBreak ? "warning" : "default"}
+        />
+        <StatCard
+          label="Net Active"
+          value={`${netActiveHours} h`}
+          hint="presence − breaks"
+        />
+        <Card className="p-5">
+          <p className="text-sm text-muted-foreground">Day Status</p>
+          <div className="mt-2">
+            <StatusBadge status={onBreak ? "BLOCKED" : log?.status} />
+            {onBreak && (
+              <p className="mt-1 text-xs text-[hsl(var(--warning))]">On break…</p>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* Mark Login */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Mark Login</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!isLoggedIn ? (
+            <div className="space-y-3">
+              <div>
+                <Label htmlFor="plannedWork">Planned Work for Today</Label>
+                <Textarea
+                  id="plannedWork"
+                  placeholder="What do you plan to work on today?"
+                  value={plannedWork}
+                  onChange={(e) => setPlannedWork(e.target.value)}
+                  required
+                />
+              </div>
+              {loginError && (
+                <p className="text-sm text-destructive">{loginError}</p>
+              )}
+              <Button
+                onClick={markLogin}
+                disabled={loginPending || plannedWork.trim().length === 0}
+              >
+                {loginPending ? "Marking…" : "Mark Login"}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="inline-flex items-center gap-2 rounded-md bg-[hsl(var(--success))]/10 px-3 py-1.5 text-sm font-medium text-[hsl(var(--success))]">
+                ✓ Logged in at {formatTime(log?.loginAt)}
+              </p>
+              <div>
+                <Label>Planned Work for Today</Label>
+                <p className="whitespace-pre-wrap rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+                  {log?.plannedWork || "—"}
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Break / Lunch tracking */}
+      {isLoggedIn && !isLoggedOut && (
+        <Card className={onBreak ? "border-[hsl(var(--warning))]/50" : undefined}>
+          <CardHeader>
+            <CardTitle>Breaks &amp; Lunch</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-center gap-3">
+              {!onBreak ? (
+                <>
+                  <Select
+                    value={breakType}
+                    onChange={(e) => setBreakType(e.target.value as BreakType)}
+                    className="w-auto"
+                  >
+                    <option value="LUNCH">Lunch</option>
+                    <option value="SHORT">Short break</option>
+                    <option value="OTHER">Other</option>
+                  </Select>
+                  <Button variant="secondary" onClick={toggleBreak} disabled={breakPending}>
+                    {breakPending ? "…" : "🍽 Out for Break"}
+                  </Button>
+                </>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="inline-flex items-center gap-2 rounded-md bg-[hsl(var(--warning))]/10 px-3 py-1.5 text-sm font-medium text-[hsl(var(--warning))]">
+                    ⏸ On {BREAK_LABELS[openBreak.type].toLowerCase()} since{" "}
+                    {formatTime(openBreak.startAt)}
+                  </span>
+                  <Button variant="success" onClick={toggleBreak} disabled={breakPending}>
+                    {breakPending ? "…" : "▶ Back to Work"}
+                  </Button>
+                </div>
+              )}
+              <span className="text-sm text-muted-foreground">
+                Total break time today:{" "}
+                <span className="font-semibold text-foreground">{totalBreakHours} h</span>
+              </span>
+            </div>
+
+            {breakError && <p className="mt-2 text-sm text-destructive">{breakError}</p>}
+
+            {breaks.length > 0 && (
+              <ul className="mt-4 space-y-2">
+                {breaks.map((b) => (
+                  <li
+                    key={b.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm"
+                  >
+                    <span className="font-medium">{BREAK_LABELS[b.type]}</span>
+                    <span className="text-muted-foreground">
+                      {formatTime(b.startAt)} →{" "}
+                      {b.endAt ? (
+                        formatTime(b.endAt)
+                      ) : (
+                        <span className="text-[hsl(var(--warning))]">ongoing</span>
+                      )}
+                      {b.endAt && (
+                        <span className="ml-2 text-foreground">
+                          ({round(hoursBetween(b.startAt, b.endAt))} h)
+                        </span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Project & Task Logging */}
+      <Card className={!isLoggedIn ? "opacity-60" : undefined}>
+        <CardHeader>
+          <CardTitle>Project &amp; Task Logging</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!isLoggedIn ? (
+            <p className="text-sm text-muted-foreground">
+              Mark login to start logging your work.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {/* Header row (desktop) */}
+              <div className="hidden gap-3 px-1 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[1fr_1.5fr_110px_40px]">
+                <span>Project</span>
+                <span>Task Description</span>
+                <span>Hours</span>
+                <span />
+              </div>
+
+              {rows.map((row) => (
+                <div
+                  key={row.key}
+                  className="grid grid-cols-1 gap-3 rounded-lg border border-border p-3 md:grid-cols-[1fr_1.5fr_110px_40px] md:items-center md:rounded-none md:border-0 md:p-0"
+                >
+                  <div>
+                    <Label className="md:hidden">Project</Label>
+                    <Select
+                      value={row.projectId}
+                      onChange={(e) =>
+                        updateRow(row.key, { projectId: e.target.value })
+                      }
+                      disabled={isLoggedOut}
+                    >
+                      <option value="">Select project…</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="md:hidden">Task Description</Label>
+                    <Input
+                      placeholder="What did you work on?"
+                      value={row.taskDescription}
+                      onChange={(e) =>
+                        updateRow(row.key, { taskDescription: e.target.value })
+                      }
+                      disabled={isLoggedOut}
+                    />
+                  </div>
+                  <div>
+                    <Label className="md:hidden">Hours</Label>
+                    <Input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      placeholder="0"
+                      value={row.hoursWorked}
+                      onChange={(e) =>
+                        updateRow(row.key, { hoursWorked: e.target.value })
+                      }
+                      disabled={isLoggedOut}
+                    />
+                  </div>
+                  <div className="flex justify-end md:justify-center">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeRow(row.key)}
+                      disabled={isLoggedOut}
+                      aria-label="Remove row"
+                      title="Remove row"
+                    >
+                      🗑
+                    </Button>
+                  </div>
+                </div>
+              ))}
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={addRow}
+                  disabled={isLoggedOut}
+                >
+                  ➕ Add Row
+                </Button>
+                <p className="text-sm text-muted-foreground">
+                  Running total:{" "}
+                  <span className="font-semibold text-foreground">
+                    {totalHours} h
+                  </span>
+                </p>
+              </div>
+
+              {entriesError && (
+                <p className="text-sm text-destructive">{entriesError}</p>
+              )}
+
+              <div className="flex items-center gap-3">
+                <Button
+                  onClick={saveEntries}
+                  disabled={entriesPending || isLoggedOut}
+                >
+                  {entriesPending ? "Saving…" : "Save Entries"}
+                </Button>
+                {entriesSaved && (
+                  <span className="text-sm font-medium text-[hsl(var(--success))]">
+                    ✓ Entries saved
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Mark Logout */}
+      <Card className={!isLoggedIn ? "opacity-60" : undefined}>
+        <CardHeader>
+          <CardTitle>Mark Logout</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!isLoggedIn ? (
+            <p className="text-sm text-muted-foreground">
+              Mark login before you can end your day.
+            </p>
+          ) : isLoggedOut ? (
+            <div className="space-y-3 text-sm">
+              <p className="inline-flex items-center gap-2 rounded-md bg-[hsl(var(--success))]/10 px-3 py-1.5 font-medium text-[hsl(var(--success))]">
+                ✓ Logged out at {formatTime(log?.logoutAt)}
+              </p>
+              <div>
+                <Label>Overall Status</Label>
+                <div className="mt-1">
+                  <StatusBadge status={log?.status} />
+                </div>
+              </div>
+              <div>
+                <Label>Work Completed Today</Label>
+                <p className="whitespace-pre-wrap rounded-md border border-border bg-muted/40 px-3 py-2">
+                  {log?.workCompleted || "—"}
+                </p>
+              </div>
+              {log?.remarks ? (
+                <div>
+                  <Label>Remarks</Label>
+                  <p className="whitespace-pre-wrap rounded-md border border-border bg-muted/40 px-3 py-2">
+                    {log.remarks}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {savedEntriesCount === 0 && (
+                <p className="rounded-md bg-[hsl(var(--warning))]/10 px-3 py-2 text-sm text-[hsl(var(--warning))]">
+                  Tip: save at least one work entry before marking logout.
+                </p>
+              )}
+              <div>
+                <Label htmlFor="workCompleted">Work Completed Today</Label>
+                <Textarea
+                  id="workCompleted"
+                  placeholder="Summarize what you accomplished."
+                  value={workCompleted}
+                  onChange={(e) => setWorkCompleted(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label htmlFor="status">Overall Status</Label>
+                <Select
+                  id="status"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as DayStatus)}
+                >
+                  <option value="COMPLETED">Completed</option>
+                  <option value="IN_PROGRESS">In Progress</option>
+                  <option value="BLOCKED">Blocked</option>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="remarks">Remarks</Label>
+                <Textarea
+                  id="remarks"
+                  placeholder="Anything else to note (optional)."
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                />
+              </div>
+              {logoutError && (
+                <p className="text-sm text-destructive">{logoutError}</p>
+              )}
+              <Button
+                variant="success"
+                onClick={markLogout}
+                disabled={logoutPending || workCompleted.trim().length === 0}
+              >
+                {logoutPending ? "Marking…" : "Mark Logout"}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
