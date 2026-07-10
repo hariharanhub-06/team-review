@@ -274,11 +274,16 @@ export function DashboardClient({
   const totalBreakHours = useMemo(() => {
     return round(
       breaks.reduce((sum, b) => {
-        const end = b.endAt ? new Date(b.endAt) : new Date(now);
+        // An open break ends at logout (if logged out) or "now" (still active).
+        const end = b.endAt
+          ? new Date(b.endAt)
+          : log?.logoutAt
+          ? new Date(log.logoutAt)
+          : new Date(now);
         return sum + hoursBetween(b.startAt, end);
       }, 0)
     );
-  }, [breaks, now]);
+  }, [breaks, now, log]);
 
   // Net active presence = login duration minus break time (only when logged out).
   const netActiveHours = useMemo(() => {

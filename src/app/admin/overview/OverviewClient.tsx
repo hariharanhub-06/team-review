@@ -42,6 +42,7 @@ interface Row {
   loginHours: number;
   breakHours: number;
   netActiveHours: number;
+  sessionStatus: string;
   status: string | null;
   plannedWork: string | null;
   workCompleted: string | null;
@@ -55,7 +56,12 @@ interface Summary {
   totalHours: number;
 }
 
-const STATUS_OPTIONS = ["COMPLETED", "IN_PROGRESS", "BLOCKED"];
+const STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: "COMPLETED", label: "Completed" },
+  { value: "ACTIVE", label: "Active" },
+  { value: "UNCALCULATED", label: "Uncalculated" },
+  { value: "ABSENT", label: "Absent" },
+];
 
 /** yyyy-mm-dd for `n` days ago (UTC). */
 function isoDaysAgo(n: number): string {
@@ -196,8 +202,8 @@ export default function OverviewClient({
               >
                 <option value="">All statuses</option>
                 {STATUS_OPTIONS.map((s) => (
-                  <option key={s} value={s}>
-                    {s.replace("_", " ")}
+                  <option key={s.value} value={s.value}>
+                    {s.label}
                   </option>
                 ))}
               </Select>
@@ -321,19 +327,23 @@ export default function OverviewClient({
                             {row.logoutAt ? formatTime(row.logoutAt) : "—"}
                           </td>
                           <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
-                            {round(row.loginHours)}
+                            {row.sessionStatus === "UNCALCULATED"
+                              ? "—"
+                              : round(row.loginHours)}
                           </td>
                           <td className="px-2 py-2 text-right tabular-nums text-[hsl(var(--warning))]">
                             {row.breakHours ? round(row.breakHours) : "—"}
                           </td>
                           <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
-                            {round(row.netActiveHours)}
+                            {row.sessionStatus === "UNCALCULATED"
+                              ? "—"
+                              : round(row.netActiveHours)}
                           </td>
                           <td className="px-2 py-2 text-right tabular-nums text-foreground">
                             {round(row.totalWorkHours)}
                           </td>
                           <td className="px-2 py-2">
-                            <StatusBadge status={row.status} />
+                            <StatusBadge status={row.sessionStatus} />
                           </td>
                         </tr>
                         {isOpen && hasEntries && (

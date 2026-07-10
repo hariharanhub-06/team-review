@@ -54,6 +54,32 @@ export function round(n: number, dp = 1): number {
   return Math.round(n * f) / f;
 }
 
+export type SessionStatus = "COMPLETED" | "ACTIVE" | "UNCALCULATED" | "ABSENT";
+
+/**
+ * Derive a day's session status from login/logout timestamps.
+ * - COMPLETED    : logged in and logged out.
+ * - ACTIVE       : logged in, not yet logged out, still within the grace window
+ *                  (until 12:00 / noon the day AFTER the log date).
+ * - UNCALCULATED : logged in, never logged out, and the grace window has passed
+ *                  (hours cannot be calculated).
+ * - ABSENT       : never logged in.
+ */
+export function sessionStatus(
+  date: string | Date,
+  loginAt?: string | Date | null,
+  logoutAt?: string | Date | null,
+  now: Date = new Date()
+): SessionStatus {
+  if (!loginAt) return "ABSENT";
+  if (logoutAt) return "COMPLETED";
+  const cutoff = new Date(date);
+  cutoff.setUTCHours(0, 0, 0, 0);
+  cutoff.setUTCDate(cutoff.getUTCDate() + 1); // next day
+  cutoff.setUTCHours(12, 0, 0, 0); // 12:00 (noon) the next day
+  return now.getTime() > cutoff.getTime() ? "UNCALCULATED" : "ACTIVE";
+}
+
 /** Format a decimal-hours value as "Xh Ym" (e.g. 3.5 -> "3h 30m", 0.75 -> "45m"). */
 export function formatDuration(hours?: number | null): string {
   if (!hours || hours <= 0) return "0m";

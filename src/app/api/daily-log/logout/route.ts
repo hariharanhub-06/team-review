@@ -39,11 +39,19 @@ export async function POST(request: Request) {
   }
 
   const { workCompleted, remarks } = parsed.data;
+  const now = new Date();
+
+  // If the member forgot to end a break, close it at logout time so break/active
+  // hours don't keep counting after they've left.
+  await prisma.break.updateMany({
+    where: { dailyLog: { userId: user.sub, date }, endAt: null },
+    data: { endAt: now },
+  });
 
   const log = await prisma.dailyLog.update({
     where: { userId_date: { userId: user.sub, date } },
     data: {
-      logoutAt: new Date(),
+      logoutAt: now,
       workCompleted,
       remarks,
     },

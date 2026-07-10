@@ -231,11 +231,17 @@ export function StatusBadge({ status }: { status?: string | null }) {
     TODO: "default",
     BLOCKED: "destructive",
     REJECTED: "destructive",
+    ACTIVE: "info",
+    UNCALCULATED: "warning",
+    ABSENT: "default",
   };
   const labels: Record<string, string> = {
     IN_REVIEW: "In Review",
     IN_PROGRESS: "In Progress",
     REJECTED: "Rejected",
+    ACTIVE: "Active",
+    UNCALCULATED: "Uncalculated",
+    ABSENT: "Absent",
   };
   const label = labels[status] ?? status.replace(/_/g, " ");
   return <Badge tone={map[status] ?? "default"}>{label}</Badge>;

@@ -1,9 +1,9 @@
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
-import { hoursBetween, toDateOnly, round } from "@/lib/utils";
-import type { Prisma, DayStatus } from "@prisma/client";
+import { hoursBetween, toDateOnly, round, sessionStatus } from "@/lib/utils";
+import type { Prisma } from "@prisma/client";
 
-const STATUSES: DayStatus[] = ["COMPLETED", "IN_PROGRESS", "BLOCKED"];
+const SESSION_STATUSES = ["COMPLETED", "ACTIVE", "UNCALCULATED", "ABSENT"];
 
 export async function GET(request: Request) {
   try {
@@ -17,6 +17,8 @@ export async function GET(request: Request) {
   const userId = params.get("userId") || undefined;
   const projectId = params.get("projectId") || undefined;
   const statusParam = params.get("status") || undefined;
+  const wantStatus =
+    statusParam && SESSION_STATUSES.includes(statusParam) ? statusParam : undefined;
   const from = params.get("from") || undefined;
   const to = params.get("to") || undefined;
 
@@ -29,9 +31,6 @@ export async function GET(request: Request) {
     where.date = dateFilter;
   }
   if (userId) where.userId = userId;
-  if (statusParam && STATUSES.includes(statusParam as DayStatus)) {
-    where.status = statusParam as DayStatus;
-  }
 
   const logs = await prisma.dailyLog.findMany({
     where,
@@ -47,7 +46,7 @@ export async function GET(request: Request) {
     },
   });
 
-  const rows = logs
+  const allRows = logs
     // If a project filter is set, only keep logs that have a matching entry.
     .filter((log) => (projectId ? log.workEntries.length > 0 : true))
     .map((log) => {
@@ -55,11 +54,14 @@ export async function GET(request: Request) {
         (sum, e) => sum + e.hoursWorked,
         0
       );
-      const breakHours = log.breaks.reduce(
-        (sum, b) => sum + hoursBetween(b.startAt, b.endAt),
-        0
-      );
+      const breakHours = log.breaks.reduce((sum, b) => {
+        // Bound an unclosed break to logout (or now, if still active).
+        const bEnd = b.endAt ?? log.logoutAt ?? new Date();
+        return sum + hoursBetween(b.startAt, bEnd);
+      }, 0);
       const loginHours = hoursBetween(log.loginAt, log.logoutAt);
+      const session = sessionStatus(log.date, log.loginAt, log.logoutAt);
+      const calculable = session === "COMPLETED";
       return {
         id: log.id,
         date: log.date,
@@ -67,9 +69,10 @@ export async function GET(request: Request) {
         userEmail: log.user.email,
         loginAt: log.loginAt,
         logoutAt: log.logoutAt,
-        loginHours: round(loginHours),
+        sessionStatus: session,
+        loginHours: calculable ? round(loginHours) : 0,
         breakHours: round(breakHours),
-        netActiveHours: round(Math.max(0, loginHours - breakHours)),
+        netActiveHours: calculable ? round(Math.max(0, loginHours - breakHours)) : 0,
         breaks: log.breaks.map((b) => ({
           type: b.type,
           startAt: b.startAt,
@@ -87,6 +90,10 @@ export async function GET(request: Request) {
         })),
       };
     });
+
+  const rows = wantStatus
+    ? allRows.filter((r) => r.sessionStatus === wantStatus)
+    : allRows;
 
   const totalHours = round(
     rows.reduce((sum, r) => sum + r.totalWorkHours, 0)
