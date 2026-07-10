@@ -38,14 +38,13 @@ export async function POST(request: Request) {
     return Response.json({ error: "Mark login first" }, { status: 400 });
   }
 
-  const { workCompleted, status, remarks } = parsed.data;
+  const { workCompleted, remarks } = parsed.data;
 
   const log = await prisma.dailyLog.update({
     where: { userId_date: { userId: user.sub, date } },
     data: {
       logoutAt: new Date(),
       workCompleted,
-      status,
       remarks,
     },
     include: {

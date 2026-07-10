@@ -26,6 +26,11 @@ export const markLoginSchema = z.object({
   plannedWork: z.string().min(1, "Planned work is required"),
 });
 
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+  newPassword: z.string().min(6, "New password must be at least 6 characters"),
+});
+
 export const workEntrySchema = z.object({
   projectId: z.string().min(1),
   taskId: z.string().optional().nullable(),
@@ -35,7 +40,6 @@ export const workEntrySchema = z.object({
 
 export const markLogoutSchema = z.object({
   workCompleted: z.string().min(1, "Work completed is required"),
-  status: z.enum(["COMPLETED", "IN_PROGRESS", "BLOCKED"]),
   remarks: z.string().optional().default(""),
 });
 

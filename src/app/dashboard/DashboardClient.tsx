@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   Badge,
   Button,
@@ -133,7 +133,7 @@ const CUSTOM_TASK = "__custom__";
 export function DashboardClient({
   initialLog,
   projects,
-  tasks,
+  tasks: initialTasks,
   userName,
 }: {
   initialLog: SerializedLog | null;
@@ -141,9 +141,14 @@ export function DashboardClient({
   tasks: SerializedTask[];
   userName: string;
 }) {
-  const router = useRouter();
   const [log, setLog] = useState<SerializedLog | null>(initialLog);
-  const [tab, setTab] = useState<"today" | "work" | "tasks">("today");
+  const [tasks, setTasks] = useState<SerializedTask[]>(initialTasks);
+
+  // Active section is driven by the sidebar link (?tab=work|tasks).
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const tab: "today" | "work" | "tasks" =
+    tabParam === "work" ? "work" : tabParam === "tasks" ? "tasks" : "today";
 
   // My Tasks
   const [taskPending, setTaskPending] = useState<string | null>(null);
@@ -158,11 +163,24 @@ export function DashboardClient({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "submit" }),
       });
+      const d = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
         throw new Error(d.error ?? "Failed to submit task");
       }
-      router.refresh();
+      // Update just this task in place — no page refresh needed.
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskId
+            ? {
+                ...t,
+                status: d.task?.status ?? "IN_REVIEW",
+                reviewNote: d.task?.reviewNote ?? null,
+                submittedAt: d.task?.submittedAt ?? null,
+                isOverdue: false,
+              }
+            : t
+        )
+      );
     } catch (e) {
       setTaskError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -186,9 +204,6 @@ export function DashboardClient({
   // Logout form
   const [workCompleted, setWorkCompleted] = useState(
     initialLog?.workCompleted ?? ""
-  );
-  const [status, setStatus] = useState<DayStatus>(
-    initialLog?.status ?? "IN_PROGRESS"
   );
   const [remarks, setRemarks] = useState(initialLog?.remarks ?? "");
   const [logoutPending, setLogoutPending] = useState(false);
@@ -361,7 +376,7 @@ export function DashboardClient({
       const res = await fetch("/api/daily-log/logout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ workCompleted, status, remarks }),
+        body: JSON.stringify({ workCompleted, remarks }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to mark logout");
@@ -442,7 +457,7 @@ export function DashboardClient({
       )}
 
       {/* Status strip */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5">
         <StatCard
           label="Login Time"
           value={formatTime(log?.loginAt)}
@@ -469,57 +484,19 @@ export function DashboardClient({
         <StatCard
           label="Net Active"
           value={formatDuration(netActiveHours)}
-          hint="presence − breaks"
+          hint={onBreak ? "on break…" : "presence − breaks"}
+          tone={onBreak ? "warning" : "default"}
         />
-        <Card className="p-5">
-          <p className="text-sm text-muted-foreground">Day Status</p>
-          <div className="mt-2">
-            <StatusBadge status={onBreak ? "BLOCKED" : log?.status} />
-            {onBreak && (
-              <p className="mt-1 text-xs text-[hsl(var(--warning))]">On break…</p>
-            )}
-          </div>
-        </Card>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 rounded-lg border border-border bg-card p-1 text-sm">
-        {([
-          ["today", "🗓️ Today"],
-          ["work", "📝 Work Log"],
-          ["tasks", "✅ My Tasks"],
-        ] as const).map(([key, label]) => {
-          const badge =
-            key === "tasks"
-              ? tasks.filter((t) =>
-                  ["TODO", "IN_PROGRESS", "REJECTED"].includes(t.status)
-                ).length
-              : 0;
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 font-medium transition-colors",
-                tab === key ? "bg-primary text-primary-foreground" : "hover:bg-accent"
-              )}
-            >
-              {label}
-              {badge > 0 && (
-                <span
-                  className={cn(
-                    "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs",
-                    tab === key ? "bg-primary-foreground/20" : "bg-primary/15 text-primary"
-                  )}
-                >
-                  {badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      {/* Section heading (chosen from the sidebar menu) */}
+      <p className="text-sm font-medium text-muted-foreground">
+        {tab === "today"
+          ? "🗓️ Today — attendance & breaks"
+          : tab === "work"
+          ? "📝 Work Log"
+          : "✅ My Tasks"}
+      </p>
 
       {/* My Tasks tab */}
       {tab === "tasks" && tasks.length > 0 && (
@@ -957,12 +934,6 @@ export function DashboardClient({
               </p>
               {hoursByProjectBlock}
               <div>
-                <Label>Overall Status</Label>
-                <div className="mt-1">
-                  <StatusBadge status={log?.status} />
-                </div>
-              </div>
-              <div>
                 <Label>Work Completed Today</Label>
                 <p className="whitespace-pre-wrap rounded-md border border-border bg-muted/40 px-3 py-2">
                   {log?.workCompleted || "—"}
@@ -993,18 +964,6 @@ export function DashboardClient({
                   value={workCompleted}
                   onChange={(e) => setWorkCompleted(e.target.value)}
                 />
-              </div>
-              <div>
-                <Label htmlFor="status">Overall Status</Label>
-                <Select
-                  id="status"
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as DayStatus)}
-                >
-                  <option value="COMPLETED">Completed</option>
-                  <option value="IN_PROGRESS">In Progress</option>
-                  <option value="BLOCKED">Blocked</option>
-                </Select>
               </div>
               <div>
                 <Label htmlFor="remarks">Remarks</Label>

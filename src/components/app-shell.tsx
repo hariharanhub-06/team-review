@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
@@ -11,9 +11,16 @@ export interface NavItem {
   href: string;
   label: string;
   icon: string;
+  /** For member dashboard sections: which ?tab= value this item represents. */
+  tab?: "today" | "work" | "tasks";
 }
 
-const MEMBER_NAV: NavItem[] = [{ href: "/dashboard", label: "My Dashboard", icon: "🗓️" }];
+const MEMBER_NAV: NavItem[] = [
+  { href: "/dashboard", label: "Today", icon: "🗓️", tab: "today" },
+  { href: "/dashboard?tab=work", label: "Work Log", icon: "📝", tab: "work" },
+  { href: "/dashboard?tab=tasks", label: "My Tasks", icon: "✅", tab: "tasks" },
+  { href: "/dashboard/account", label: "Change Password", icon: "🔒" },
+];
 
 const ADMIN_NAV: NavItem[] = [
   { href: "/admin", label: "Overview", icon: "🏠" },
@@ -21,6 +28,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/projects", label: "Projects", icon: "📁" },
   { href: "/admin/overview", label: "Work Logs", icon: "📋" },
   { href: "/admin/analytics", label: "Analytics", icon: "📈" },
+  { href: "/admin/account", label: "Account", icon: "🔒" },
 ];
 
 export function AppShell({
@@ -35,9 +43,22 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const nav = role === "ADMIN" ? ADMIN_NAV : MEMBER_NAV;
+  const currentTab = searchParams.get("tab") ?? "today";
+
+  function isActive(item: NavItem): boolean {
+    if (item.tab) {
+      // Member dashboard sections live on /dashboard with a ?tab= value.
+      return pathname === "/dashboard" && currentTab === item.tab;
+    }
+    if (item.href === "/admin" || item.href === "/dashboard") {
+      return pathname === item.href && !searchParams.get("tab");
+    }
+    return pathname.startsWith(item.href);
+  }
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -60,10 +81,7 @@ export function AppShell({
         </div>
         <nav className="space-y-1 p-3">
           {nav.map((item) => {
-            const active =
-              item.href === "/admin" || item.href === "/dashboard"
-                ? pathname === item.href
-                : pathname.startsWith(item.href);
+            const active = isActive(item);
             return (
               <Link
                 key={item.href}
