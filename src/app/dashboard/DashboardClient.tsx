@@ -955,6 +955,12 @@ export function DashboardClient({
             </div>
           ) : (
             <div className="space-y-3">
+              {onBreak && (
+                <p className="rounded-md bg-[hsl(var(--warning))]/10 px-3 py-2 text-sm text-[hsl(var(--warning))]">
+                  ⏸ You&apos;re on a break. Click <strong>Back to Work</strong> above before
+                  logging out.
+                </p>
+              )}
               {savedEntriesCount === 0 && (
                 <p className="rounded-md bg-[hsl(var(--warning))]/10 px-3 py-2 text-sm text-[hsl(var(--warning))]">
                   Tip: save at least one work entry before marking logout.
@@ -985,7 +991,7 @@ export function DashboardClient({
               <Button
                 variant="success"
                 onClick={markLogout}
-                disabled={logoutPending || workCompleted.trim().length === 0}
+                disabled={logoutPending || workCompleted.trim().length === 0 || onBreak}
               >
                 {logoutPending ? "Marking…" : "Mark Logout"}
               </Button>

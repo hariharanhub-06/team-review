@@ -39,14 +39,21 @@ export async function POST(request: Request) {
   }
 
   const { workCompleted, remarks } = parsed.data;
-  const now = new Date();
 
-  // If the member forgot to end a break, close it at logout time so break/active
-  // hours don't keep counting after they've left.
-  await prisma.break.updateMany({
+  // Block logout while a break is still open — the member must click "Back to Work"
+  // first so break/active time is recorded accurately.
+  const openBreak = await prisma.break.findFirst({
     where: { dailyLog: { userId: user.sub, date }, endAt: null },
-    data: { endAt: now },
+    select: { id: true },
   });
+  if (openBreak) {
+    return Response.json(
+      { error: "You're still on a break. Click \"Back to Work\" before logging out." },
+      { status: 400 }
+    );
+  }
+
+  const now = new Date();
 
   const log = await prisma.dailyLog.update({
     where: { userId_date: { userId: user.sub, date } },
