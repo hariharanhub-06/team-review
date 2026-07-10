@@ -90,3 +90,17 @@ export function formatDuration(hours?: number | null): string {
   if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;
 }
+
+/** Format a decimal-hours value as "Xh Ym Zs" with second precision (e.g. 0.0872 -> "5m 14s"). */
+export function formatDurationPrecise(hours?: number | null): string {
+  if (!hours || hours <= 0) return "0s";
+  const totalSeconds = Math.round(hours * 3600);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const parts: string[] = [];
+  if (h) parts.push(`${h}h`);
+  if (m) parts.push(`${m}m`);
+  if (s || parts.length === 0) parts.push(`${s}s`);
+  return parts.join(" ");
+}

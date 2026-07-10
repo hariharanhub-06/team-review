@@ -11,7 +11,7 @@ import {
   StatCard,
   StatusBadge,
 } from "@/components/ui";
-import { formatDate, formatTime, round } from "@/lib/utils";
+import { formatDate, formatTime, formatDurationPrecise, round } from "@/lib/utils";
 
 interface Option {
   id: string;
@@ -249,7 +249,7 @@ export default function OverviewClient({
       {/* Summary strip */}
       <div className="grid grid-cols-2 gap-4 sm:max-w-md">
         <StatCard label="Total logs" value={summary.totalLogs} />
-        <StatCard label="Total hours" value={round(summary.totalHours)} />
+        <StatCard label="Total work" value={formatDurationPrecise(summary.totalHours)} />
       </div>
 
       {/* Table */}
@@ -329,18 +329,18 @@ export default function OverviewClient({
                           <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
                             {row.sessionStatus === "UNCALCULATED"
                               ? "—"
-                              : round(row.loginHours)}
+                              : formatDurationPrecise(row.loginHours)}
                           </td>
                           <td className="px-2 py-2 text-right tabular-nums text-[hsl(var(--warning))]">
-                            {row.breakHours ? round(row.breakHours) : "—"}
+                            {row.breakHours ? formatDurationPrecise(row.breakHours) : "—"}
                           </td>
                           <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
                             {row.sessionStatus === "UNCALCULATED"
                               ? "—"
-                              : round(row.netActiveHours)}
+                              : formatDurationPrecise(row.netActiveHours)}
                           </td>
                           <td className="px-2 py-2 text-right tabular-nums text-foreground">
-                            {round(row.totalWorkHours)}
+                            {formatDurationPrecise(row.totalWorkHours)}
                           </td>
                           <td className="px-2 py-2">
                             <StatusBadge status={row.sessionStatus} />

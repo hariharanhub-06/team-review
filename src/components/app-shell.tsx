@@ -17,7 +17,6 @@ export interface NavItem {
 
 const MEMBER_NAV: NavItem[] = [
   { href: "/dashboard", label: "Today", icon: "🗓️", tab: "today" },
-  { href: "/dashboard?tab=work", label: "Work Log", icon: "📝", tab: "work" },
   { href: "/dashboard?tab=tasks", label: "My Tasks", icon: "✅", tab: "tasks" },
   { href: "/dashboard/account", label: "Change Password", icon: "🔒" },
 ];

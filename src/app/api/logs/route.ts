@@ -70,9 +70,9 @@ export async function GET(request: Request) {
         loginAt: log.loginAt,
         logoutAt: log.logoutAt,
         sessionStatus: session,
-        loginHours: calculable ? round(loginHours) : 0,
-        breakHours: round(breakHours),
-        netActiveHours: calculable ? round(Math.max(0, loginHours - breakHours)) : 0,
+        loginHours: calculable ? loginHours : 0,
+        breakHours,
+        netActiveHours: calculable ? Math.max(0, loginHours - breakHours) : 0,
         breaks: log.breaks.map((b) => ({
           type: b.type,
           startAt: b.startAt,
