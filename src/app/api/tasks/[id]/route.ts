@@ -33,7 +33,7 @@ export async function PATCH(
 
   const existing = await prisma.task.findUnique({
     where: { id },
-    select: { status: true, completedAt: true },
+    select: { status: true, completedAt: true, submittedAt: true },
   });
   if (!existing) {
     return Response.json({ error: "Task not found" }, { status: 404 });
@@ -49,13 +49,25 @@ export async function PATCH(
     update.endDate = data.endDate ? toDateOnly(data.endDate) : null;
   if (data.assigneeId !== undefined)
     update.assigneeId = data.assigneeId ? data.assigneeId : null;
+  if (data.reviewNote !== undefined) update.reviewNote = data.reviewNote || null;
 
   if (data.status !== undefined) {
     update.status = data.status;
-    if (data.status === "DONE" && existing.status !== "DONE") {
-      update.completedAt = existing.completedAt ?? new Date();
-    } else if (data.status !== "DONE" && existing.status === "DONE") {
-      update.completedAt = null;
+    switch (data.status) {
+      case "DONE": // approve
+        update.completedAt = existing.completedAt ?? new Date();
+        if (data.reviewNote === undefined) update.reviewNote = null;
+        break;
+      case "REJECTED": // send back to the member
+        update.completedAt = null;
+        break;
+      case "IN_REVIEW":
+        update.submittedAt = existing.submittedAt ?? new Date();
+        break;
+      default: // TODO / IN_PROGRESS
+        update.completedAt = null;
+        update.submittedAt = null;
+        if (data.reviewNote === undefined) update.reviewNote = null;
     }
   }
 

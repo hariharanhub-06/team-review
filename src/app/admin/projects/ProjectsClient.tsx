@@ -13,10 +13,11 @@ import {
   CardContent,
   Badge,
 } from "@/components/ui";
-import { formatDate, cn } from "@/lib/utils";
+import { formatDate, formatDuration, cn } from "@/lib/utils";
+import { taskOverdue } from "@/lib/tasks";
 
 /* ---------------- Types (serialized shapes) ---------------- */
-type TaskStatus = "TODO" | "IN_PROGRESS" | "DONE";
+type TaskStatus = "TODO" | "IN_PROGRESS" | "IN_REVIEW" | "DONE" | "REJECTED";
 
 interface Member {
   id: string;
@@ -31,6 +32,9 @@ interface Task {
   endDate: string | null;
   status: TaskStatus;
   completedAt: string | null;
+  submittedAt: string | null;
+  reviewNote: string | null;
+  hoursWorked: number;
   assigneeId: string | null;
   assignee: { id: string; name: string } | null;
   createdAt: string;
@@ -43,6 +47,9 @@ interface Project {
   startDate: string | null;
   endDate: string | null;
   deliverables: string | null;
+  onHold: boolean;
+  holdSince: string | null;
+  heldDays: number;
   createdAt: string;
   _count: { tasks: number };
   tasks: Task[];
@@ -60,31 +67,27 @@ function toInputDate(value: string | null | undefined): string {
   return value.slice(0, 10);
 }
 
-function startOfTodayUtc(): number {
-  const d = new Date();
-  return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
-}
-
-function isOverdue(task: Task): boolean {
-  if (!task.endDate || task.status === "DONE") return false;
-  return new Date(task.endDate).getTime() < startOfTodayUtc();
+function isOverdue(task: Task, project: Project): boolean {
+  return taskOverdue(task.endDate, task.status, project).overdue;
 }
 
 interface TaskSummary {
   total: number;
   done: number;
   overdue: number;
+  inReview: number;
 }
 
-function summarize(tasks: Task[]): TaskSummary {
-  return tasks.reduce<TaskSummary>(
+function summarize(project: Project): TaskSummary {
+  return project.tasks.reduce<TaskSummary>(
     (acc, t) => {
       acc.total += 1;
       if (t.status === "DONE") acc.done += 1;
-      if (isOverdue(t)) acc.overdue += 1;
+      if (t.status === "IN_REVIEW") acc.inReview += 1;
+      if (isOverdue(t, project)) acc.overdue += 1;
       return acc;
     },
-    { total: 0, done: 0, overdue: 0 }
+    { total: 0, done: 0, overdue: 0, inReview: 0 }
   );
 }
 
@@ -237,6 +240,21 @@ export default function ProjectsClient({ initialProjects, members }: Props) {
     await refetchProjects();
   }
 
+  async function toggleHold(p: Project) {
+    setError(null);
+    const res = await fetch(`/api/projects/${p.id}/hold`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ hold: !p.onHold }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setError(data.error ?? "Failed to update hold status");
+      return;
+    }
+    await refetchProjects();
+  }
+
   async function deleteProject(p: Project) {
     if (
       !window.confirm(
@@ -282,12 +300,39 @@ export default function ProjectsClient({ initialProjects, members }: Props) {
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {projects.map((p) => {
-            const s = summarize(p.tasks);
+            const s = summarize(p);
             return (
-              <Card key={p.id} className="flex flex-col">
+              <Card
+                key={p.id}
+                className={cn(
+                  "flex flex-col",
+                  p.onHold && "border-[hsl(var(--warning))]/50 bg-[hsl(var(--warning))]/5"
+                )}
+              >
                 <CardHeader className="flex flex-row items-start justify-between gap-2">
-                  <CardTitle className="min-w-0 break-words">{p.name}</CardTitle>
+                  <div className="min-w-0">
+                    <CardTitle className="break-words">{p.name}</CardTitle>
+                    {p.onHold && (
+                      <Badge tone="warning" className="mt-1">
+                        ⏸ On Hold
+                      </Badge>
+                    )}
+                    {!p.onHold && p.heldDays > 0 && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {p.heldDays}d previously on hold (excluded from overdue)
+                      </p>
+                    )}
+                  </div>
                   <div className="flex shrink-0 gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title={p.onHold ? "Resume project" : "Put on hold"}
+                      aria-label={p.onHold ? "Resume project" : "Put on hold"}
+                      onClick={() => toggleHold(p)}
+                    >
+                      {p.onHold ? "▶️" : "⏸"}
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -332,6 +377,9 @@ export default function ProjectsClient({ initialProjects, members }: Props) {
                   <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
                     <Badge tone="default">{s.total} tasks</Badge>
                     <Badge tone="success">{s.done} done</Badge>
+                    {s.inReview > 0 && (
+                      <Badge tone="warning">{s.inReview} to approve</Badge>
+                    )}
                     {s.overdue > 0 && (
                       <Badge tone="destructive">{s.overdue} overdue</Badge>
                     )}
@@ -523,6 +571,31 @@ function ManageTasks({
     await onChanged();
   }
 
+  async function approveTask(task: Task) {
+    await changeStatus(task, "DONE");
+  }
+
+  async function rejectTask(task: Task) {
+    const note = window.prompt(
+      `Reject "${task.title}"? Optionally add a reason for the member:`,
+      ""
+    );
+    if (note === null) return; // cancelled
+    setBusyId(task.id);
+    setErr(null);
+    const res = await fetch(`/api/tasks/${task.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "REJECTED", reviewNote: note }),
+    });
+    setBusyId(null);
+    if (!res.ok) {
+      setErr("Failed to reject task");
+      return;
+    }
+    await onChanged();
+  }
+
   async function changeAssignee(task: Task, assigneeId: string) {
     setBusyId(task.id);
     setErr(null);
@@ -567,14 +640,16 @@ function ManageTasks({
               <tr className="border-b border-border text-left text-xs uppercase text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">Title</th>
                 <th className="py-2 pr-3 font-medium">Dates</th>
+                <th className="py-2 pr-3 text-right font-medium">Hours</th>
                 <th className="py-2 pr-3 font-medium">Status</th>
                 <th className="py-2 pr-3 font-medium">Assignee</th>
+                <th className="py-2 pr-3 font-medium">Approval</th>
                 <th className="py-2 font-medium"></th>
               </tr>
             </thead>
             <tbody>
               {tasks.map((t) => {
-                const overdue = isOverdue(t);
+                const overdue = isOverdue(t, project);
                 return (
                   <tr
                     key={t.id}
@@ -601,6 +676,9 @@ function ManageTasks({
                     <td className="whitespace-nowrap py-2 pr-3 text-xs text-muted-foreground">
                       {formatDate(t.startDate)} → {formatDate(t.endDate)}
                     </td>
+                    <td className="py-2 pr-3 text-right tabular-nums">
+                      {formatDuration(t.hoursWorked)}
+                    </td>
                     <td className="py-2 pr-3">
                       <Select
                         className="h-8 w-[140px] py-1 text-xs"
@@ -612,7 +690,9 @@ function ManageTasks({
                       >
                         <option value="TODO">To do</option>
                         <option value="IN_PROGRESS">In progress</option>
+                        <option value="IN_REVIEW">In review</option>
                         <option value="DONE">Done</option>
+                        <option value="REJECTED">Rejected</option>
                       </Select>
                     </td>
                     <td className="py-2 pr-3">
@@ -629,6 +709,34 @@ function ManageTasks({
                           </option>
                         ))}
                       </Select>
+                    </td>
+                    <td className="py-2 pr-3">
+                      {t.status === "IN_REVIEW" ? (
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="success"
+                            disabled={busyId === t.id}
+                            onClick={() => approveTask(t)}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={busyId === t.id}
+                            onClick={() => rejectTask(t)}
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      ) : t.status === "DONE" ? (
+                        <span className="text-xs text-[hsl(var(--success))]">Approved</span>
+                      ) : t.status === "REJECTED" ? (
+                        <span className="text-xs text-destructive">Rejected</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="py-2 text-right">
                       <Button
@@ -693,7 +801,9 @@ function ManageTasks({
           >
             <option value="TODO">To do</option>
             <option value="IN_PROGRESS">In progress</option>
+            <option value="IN_REVIEW">In review</option>
             <option value="DONE">Done</option>
+            <option value="REJECTED">Rejected</option>
           </Select>
         </div>
         <div>

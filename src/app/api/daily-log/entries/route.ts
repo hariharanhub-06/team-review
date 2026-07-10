@@ -42,6 +42,7 @@ export async function POST(request: Request) {
     .map((e) => ({
       dailyLogId: existing.id,
       projectId: e.projectId,
+      taskId: e.taskId || null,
       taskDescription: e.taskDescription,
       hoursWorked: e.hoursWorked,
     }));

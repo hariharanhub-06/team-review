@@ -28,6 +28,7 @@ export const markLoginSchema = z.object({
 
 export const workEntrySchema = z.object({
   projectId: z.string().min(1),
+  taskId: z.string().optional().nullable(),
   taskDescription: z.string().min(1),
   hoursWorked: z.coerce.number().min(0).max(24),
 });
@@ -50,13 +51,22 @@ export const projectSchema = z.object({
   deliverables: z.string().optional().default(""),
 });
 
+export const TASK_STATUSES = [
+  "TODO",
+  "IN_PROGRESS",
+  "IN_REVIEW",
+  "DONE",
+  "REJECTED",
+] as const;
+
 export const taskSchema = z.object({
   projectId: z.string().min(1),
   title: z.string().min(1, "Title is required"),
   startDate: z.string().optional().nullable(),
   endDate: z.string().optional().nullable(),
-  status: z.enum(["TODO", "IN_PROGRESS", "DONE"]).default("TODO"),
+  status: z.enum(TASK_STATUSES).default("TODO"),
   assigneeId: z.string().optional().nullable(),
+  reviewNote: z.string().optional().nullable(),
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;

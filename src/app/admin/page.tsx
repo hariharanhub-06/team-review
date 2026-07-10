@@ -9,30 +9,32 @@ import {
   CardContent,
   Badge,
   StatCard,
+  StarRating,
 } from "@/components/ui";
 
 export default async function AdminOverviewPage() {
   const to = todayUtc();
   const from = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), 1));
 
-  const [analytics, totalUsers, totalMembers, totalProjects, totalTasks] =
+  const [analytics, totalUsers, totalMembers, totalProjects, totalTasks, pendingApprovals] =
     await Promise.all([
       getAnalytics({ from, to }),
       prisma.user.count(),
       prisma.user.count({ where: { role: "MEMBER" } }),
       prisma.project.count(),
       prisma.task.count(),
+      prisma.task.findMany({
+        where: { status: "IN_REVIEW" },
+        orderBy: { submittedAt: "asc" },
+        include: {
+          project: { select: { name: true } },
+          assignee: { select: { name: true } },
+        },
+      }),
     ]);
 
   const { totals, taskStats, perUser, overdueTasks, projectDistribution } =
     analytics;
-
-  const scoreTone =
-    totals.avgScore >= 60
-      ? "success"
-      : totals.avgScore >= 40
-      ? "warning"
-      : "destructive";
 
   const topPerformers = [...perUser].sort((a, b) => a.rank - b.rank).slice(0, 3);
 
@@ -40,9 +42,6 @@ export default async function AdminOverviewPage() {
     .sort((a, b) => b.hours - a.hours)
     .slice(0, 6);
   const maxProjectHours = Math.max(1, ...topProjects.map((p) => p.hours));
-
-  const scoreBadgeTone = (score: number) =>
-    score >= 60 ? "success" : score >= 40 ? "warning" : "destructive";
 
   const quickLinks = [
     { href: "/admin/users", label: "Users", icon: "👥" },
@@ -76,14 +75,14 @@ export default async function AdminOverviewPage() {
         />
         <StatCard
           label="Avg Productivity"
-          value={round(totals.avgScore)}
-          tone={scoreTone}
-          hint="Score 0–100"
+          value={<StarRating score={totals.avgScore} size={18} showValue />}
+          hint="Team average"
         />
         <StatCard
-          label="Task Completion"
-          value={`${round(taskStats.completionRate)}%`}
-          hint={`${taskStats.completed}/${taskStats.total} tasks`}
+          label="Pending Approvals"
+          value={pendingApprovals.length}
+          tone={pendingApprovals.length > 0 ? "warning" : "success"}
+          hint="Tasks awaiting review"
         />
         <StatCard
           label="Overdue Tasks"
@@ -91,6 +90,39 @@ export default async function AdminOverviewPage() {
           tone={taskStats.overdue > 0 ? "destructive" : "success"}
         />
       </div>
+
+      {/* Pending approvals (full width when present) */}
+      {pendingApprovals.length > 0 && (
+        <Card className="border-[hsl(var(--warning))]/40">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>⏳ Tasks Awaiting Approval ({pendingApprovals.length})</CardTitle>
+            <Link
+              href="/admin/projects"
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Review in Projects →
+            </Link>
+          </CardHeader>
+          <CardContent>
+            <ul className="space-y-2">
+              {pendingApprovals.slice(0, 8).map((t) => (
+                <li
+                  key={t.id}
+                  className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-foreground">{t.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {t.project.name} · {t.assignee?.name ?? "Unassigned"}
+                    </p>
+                  </div>
+                  <Badge tone="warning">In Review</Badge>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Top performers */}
@@ -121,9 +153,8 @@ export default async function AdminOverviewPage() {
                         </p>
                       </div>
                     </div>
-                    <Badge tone={scoreBadgeTone(u.breakdown.score)}>
-                      {round(u.breakdown.score)}
-                    </Badge>
+                    <StarRating score={u.breakdown.score} />
+
                   </li>
                 ))}
               </ul>

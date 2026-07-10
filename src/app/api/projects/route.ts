@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
-import { toDateOnly } from "@/lib/utils";
+import { toDateOnly, round } from "@/lib/utils";
 import { projectSchema } from "@/lib/validation";
 
 export async function GET() {
@@ -11,18 +11,40 @@ export async function GET() {
     throw e;
   }
 
-  const projects = await prisma.project.findMany({
-    orderBy: { createdAt: "desc" },
-    include: {
-      _count: { select: { tasks: true } },
-      tasks: {
-        orderBy: { endDate: "asc" },
-        include: { assignee: { select: { id: true, name: true } } },
+  const [projects, entries] = await Promise.all([
+    prisma.project.findMany({
+      orderBy: { createdAt: "desc" },
+      include: {
+        _count: { select: { tasks: true } },
+        tasks: {
+          orderBy: { endDate: "asc" },
+          include: { assignee: { select: { id: true, name: true } } },
+        },
       },
-    },
-  });
+    }),
+    prisma.workEntry.findMany({
+      select: { taskId: true, projectId: true, taskDescription: true, hoursWorked: true },
+    }),
+  ]);
 
-  return Response.json({ projects });
+  // Total hours logged per task (linked via taskId, or legacy title match).
+  const withHours = projects.map((p) => ({
+    ...p,
+    tasks: p.tasks.map((t) => ({
+      ...t,
+      hoursWorked: round(
+        entries
+          .filter(
+            (e) =>
+              e.taskId === t.id ||
+              (!e.taskId && e.projectId === t.projectId && e.taskDescription === t.title)
+          )
+          .reduce((sum, e) => sum + e.hoursWorked, 0)
+      ),
+    })),
+  }));
+
+  return Response.json({ projects: withHours });
 }
 
 export async function POST(request: Request) {

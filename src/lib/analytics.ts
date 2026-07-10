@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { hoursBetween, round } from "./utils";
 import { computeScore, workingDaysBetween, type ScoreBreakdown } from "./scoring";
+import { taskOverdue } from "./tasks";
 
 export interface AnalyticsFilters {
   from: Date;
@@ -170,17 +171,20 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
         s.completed++;
         if (ok) s.onTime++;
       }
-    } else if (t.endDate && endOfDay(t.endDate) < now) {
-      overdue++;
-      if (t.assigneeId) ensureTaskStat(t.assigneeId).overdue++;
-      overdueTasks.push({
-        id: t.id,
-        title: t.title,
-        project: t.project.name,
-        assignee: t.assignee?.name ?? null,
-        endDate: t.endDate,
-        daysOverdue: Math.floor((now.getTime() - endOfDay(t.endDate).getTime()) / 86_400_000),
-      });
+    } else {
+      const od = taskOverdue(t.endDate, t.status, t.project, now.getTime());
+      if (od.overdue) {
+        overdue++;
+        if (t.assigneeId) ensureTaskStat(t.assigneeId).overdue++;
+        overdueTasks.push({
+          id: t.id,
+          title: t.title,
+          project: t.project.name,
+          assignee: t.assignee?.name ?? null,
+          endDate: t.endDate,
+          daysOverdue: od.daysOverdue,
+        });
+      }
     }
   }
 

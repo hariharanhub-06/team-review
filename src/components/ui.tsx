@@ -178,6 +178,48 @@ export function StatCard({
   );
 }
 
+/* ---------------- Star rating ---------------- */
+/** Renders a 0–100 score as 5 stars with smooth fractional fill. */
+export function StarRating({
+  score,
+  size = 16,
+  showValue = false,
+  className,
+}: {
+  score: number;
+  size?: number;
+  showValue?: boolean;
+  className?: string;
+}) {
+  const pct = Math.max(0, Math.min(100, score || 0));
+  const stars = "★★★★★";
+  return (
+    <span
+      className={cn("inline-flex items-center gap-1.5 align-middle", className)}
+      title={`${(pct / 20).toFixed(1)} / 5 stars`}
+    >
+      <span
+        className="relative inline-block whitespace-nowrap leading-none"
+        style={{ fontSize: size }}
+        aria-hidden
+      >
+        <span className="text-muted-foreground/30">{stars}</span>
+        <span
+          className="absolute inset-0 overflow-hidden whitespace-nowrap text-[hsl(var(--warning))]"
+          style={{ width: `${pct}%` }}
+        >
+          {stars}
+        </span>
+      </span>
+      {showValue && (
+        <span className="text-xs font-medium text-muted-foreground">
+          {(pct / 20).toFixed(1)}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /* ---------------- Status badge helper ---------------- */
 export function StatusBadge({ status }: { status?: string | null }) {
   if (!status) return <Badge>—</Badge>;
@@ -185,9 +227,16 @@ export function StatusBadge({ status }: { status?: string | null }) {
     COMPLETED: "success",
     DONE: "success",
     IN_PROGRESS: "info",
+    IN_REVIEW: "warning",
     TODO: "default",
     BLOCKED: "destructive",
+    REJECTED: "destructive",
   };
-  const label = status.replace("_", " ");
+  const labels: Record<string, string> = {
+    IN_REVIEW: "In Review",
+    IN_PROGRESS: "In Progress",
+    REJECTED: "Rejected",
+  };
+  const label = labels[status] ?? status.replace(/_/g, " ");
   return <Badge tone={map[status] ?? "default"}>{label}</Badge>;
 }

@@ -53,3 +53,14 @@ export function round(n: number, dp = 1): number {
   const f = 10 ** dp;
   return Math.round(n * f) / f;
 }
+
+/** Format a decimal-hours value as "Xh Ym" (e.g. 3.5 -> "3h 30m", 0.75 -> "45m"). */
+export function formatDuration(hours?: number | null): string {
+  if (!hours || hours <= 0) return "0m";
+  const totalMinutes = Math.round(hours * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}

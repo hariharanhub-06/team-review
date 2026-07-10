@@ -12,6 +12,7 @@ import {
   CardContent,
   Badge,
   StatCard,
+  StarRating,
 } from "@/components/ui";
 import {
   BarChartCard,
@@ -211,7 +212,6 @@ export function AnalyticsClient({
   }
 
   const rangeLabel = `${formatDate(applied.from)} – ${formatDate(applied.to)}`;
-  const avgTone = scoreLabel(data.totals.avgScore).tone;
 
   // Resolve the drill-down member (from the applied user filter).
   const selectedMember: UserMetric | null =
@@ -355,7 +355,10 @@ export function AnalyticsClient({
           hint="Total time online"
         />
         <StatCard label="Active Members" value={data.totals.activeMembers} />
-        <StatCard label="Avg Score" value={data.totals.avgScore} tone={avgTone} />
+        <StatCard
+          label="Avg Score"
+          value={<StarRating score={data.totals.avgScore} size={18} showValue />}
+        />
         <StatCard label="Projects" value={data.totals.totalProjects} />
         <StatCard
           label="Task Completion"
@@ -463,7 +466,7 @@ export function AnalyticsClient({
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold">{u.breakdown.score}</span>
+                          <StarRating score={u.breakdown.score} />
                           <Badge tone={sl.tone}>{sl.label}</Badge>
                         </div>
                       </td>
@@ -537,7 +540,6 @@ export function AnalyticsClient({
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {data.perUser.map((u) => {
-                  const sl = scoreLabel(u.breakdown.score);
                   return (
                     <button
                       key={u.userId}
@@ -548,7 +550,7 @@ export function AnalyticsClient({
                         <span className="font-medium">
                           {medal(u.rank)} {u.name}
                         </span>
-                        <Badge tone={sl.tone}>{u.breakdown.score}</Badge>
+                        <StarRating score={u.breakdown.score} />
                       </div>
                       <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
                         <div>
@@ -643,10 +645,12 @@ function MemberDetail({ member, onBack }: { member: UserMetric; onBack: () => vo
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <div className="rounded-lg border border-border p-4">
             <p className="text-sm text-muted-foreground">Score</p>
-            <p className="mt-1 flex items-center gap-2 text-3xl font-bold">
-              {member.breakdown.score}
-              <Badge tone={sl.tone}>{sl.label}</Badge>
-            </p>
+            <div className="mt-2 flex flex-col gap-1">
+              <StarRating score={member.breakdown.score} size={22} />
+              <Badge tone={sl.tone} className="w-fit">
+                {sl.label}
+              </Badge>
+            </div>
           </div>
           <StatCard
             label="Productivity Time"

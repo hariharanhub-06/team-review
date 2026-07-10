@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
+  Badge,
   Button,
   Card,
   CardContent,
@@ -14,7 +16,7 @@ import {
   StatusBadge,
   Textarea,
 } from "@/components/ui";
-import { formatTime, hoursBetween, round } from "@/lib/utils";
+import { cn, formatDate, formatDuration, formatTime, hoursBetween, round } from "@/lib/utils";
 
 /* ---------------- Types ---------------- */
 type DayStatus = "COMPLETED" | "IN_PROGRESS" | "BLOCKED";
@@ -24,10 +26,27 @@ interface SerializedProject {
   name: string;
 }
 
+interface SerializedTask {
+  id: string;
+  title: string;
+  projectId: string;
+  projectName: string;
+  status: string;
+  endDate: string | null;
+  completedAt: string | null;
+  submittedAt: string | null;
+  reviewNote: string | null;
+  hoursWorked: number;
+  isOverdue: boolean;
+  daysOverdue: number;
+  onHold: boolean;
+}
+
 interface SerializedWorkEntry {
   id: string;
   dailyLogId: string;
   projectId: string;
+  taskId?: string | null;
   taskDescription: string;
   hoursWorked: number;
   project?: { id: string; name: string } | null;
@@ -66,39 +85,90 @@ const BREAK_LABELS: Record<BreakType, string> = {
 interface EntryRow {
   key: string;
   projectId: string;
+  taskId: string; // "" when custom / no task
   taskDescription: string;
   hoursWorked: string;
+  custom: boolean; // true = free-text task (no matching assigned task)
 }
 
 function rowKey() {
   return Math.random().toString(36).slice(2);
 }
 
-function entriesToRows(entries: SerializedWorkEntry[]): EntryRow[] {
+function entriesToRows(
+  entries: SerializedWorkEntry[],
+  tasks: SerializedTask[]
+): EntryRow[] {
   if (!entries.length) return [blankRow()];
-  return entries.map((e) => ({
-    key: rowKey(),
-    projectId: e.projectId,
-    taskDescription: e.taskDescription,
-    hoursWorked: String(e.hoursWorked),
-  }));
+  return entries.map((e) => {
+    const matchedById = e.taskId
+      ? tasks.find((t) => t.id === e.taskId)
+      : undefined;
+    const isCustom = !matchedById && e.taskDescription.length > 0;
+    return {
+      key: rowKey(),
+      projectId: e.projectId,
+      taskId: matchedById?.id ?? "",
+      taskDescription: e.taskDescription,
+      hoursWorked: String(e.hoursWorked),
+      custom: isCustom,
+    };
+  });
 }
 
 function blankRow(): EntryRow {
-  return { key: rowKey(), projectId: "", taskDescription: "", hoursWorked: "" };
+  return {
+    key: rowKey(),
+    projectId: "",
+    taskId: "",
+    taskDescription: "",
+    hoursWorked: "",
+    custom: false,
+  };
 }
+
+const CUSTOM_TASK = "__custom__";
 
 /* ---------------- Component ---------------- */
 export function DashboardClient({
   initialLog,
   projects,
+  tasks,
   userName,
 }: {
   initialLog: SerializedLog | null;
   projects: SerializedProject[];
+  tasks: SerializedTask[];
   userName: string;
 }) {
+  const router = useRouter();
   const [log, setLog] = useState<SerializedLog | null>(initialLog);
+  const [tab, setTab] = useState<"today" | "work" | "tasks">("today");
+
+  // My Tasks
+  const [taskPending, setTaskPending] = useState<string | null>(null);
+  const [taskError, setTaskError] = useState<string | null>(null);
+
+  async function submitTaskForReview(taskId: string) {
+    setTaskPending(taskId);
+    setTaskError(null);
+    try {
+      const res = await fetch(`/api/my-tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "submit" }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error ?? "Failed to submit task");
+      }
+      router.refresh();
+    } catch (e) {
+      setTaskError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setTaskPending(null);
+    }
+  }
 
   // Login form
   const [plannedWork, setPlannedWork] = useState(initialLog?.plannedWork ?? "");
@@ -107,7 +177,7 @@ export function DashboardClient({
 
   // Entries
   const [rows, setRows] = useState<EntryRow[]>(
-    entriesToRows(initialLog?.workEntries ?? [])
+    entriesToRows(initialLog?.workEntries ?? [], tasks)
   );
   const [entriesPending, setEntriesPending] = useState(false);
   const [entriesError, setEntriesError] = useState<string | null>(null);
@@ -160,6 +230,22 @@ export function DashboardClient({
       ),
     [log]
   );
+
+  // Hours logged per project for the day (shown at logout time).
+  const hoursByProject = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const e of log?.workEntries ?? []) {
+      const name = e.project?.name ?? "Unknown project";
+      map.set(name, (map.get(name) ?? 0) + (e.hoursWorked || 0));
+    }
+    return [...map.entries()]
+      .map(([name, hours]) => ({ name, hours }))
+      .sort((a, b) => b.hours - a.hours);
+  }, [log]);
+
+  // Assigned tasks available for logging under a given project (exclude completed).
+  const tasksForProject = (projectId: string) =>
+    tasks.filter((t) => t.projectId === projectId && t.status !== "DONE");
 
   const hoursSinceLogin = useMemo(() => {
     if (!log?.loginAt || log.logoutAt) return 0;
@@ -244,6 +330,7 @@ export function DashboardClient({
         .filter((r) => r.projectId && parseFloat(r.hoursWorked) > 0)
         .map((r) => ({
           projectId: r.projectId,
+          taskId: r.taskId || null,
           taskDescription: r.taskDescription,
           hoursWorked: parseFloat(r.hoursWorked),
         }));
@@ -255,7 +342,7 @@ export function DashboardClient({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save entries");
       setLog(data.log);
-      setRows(entriesToRows(data.log?.workEntries ?? []));
+      setRows(entriesToRows(data.log?.workEntries ?? [], tasks));
       setEntriesSaved(true);
       setTimeout(() => setEntriesSaved(false), 3000);
     } catch (err) {
@@ -305,6 +392,30 @@ export function DashboardClient({
   }
 
   /* ---------------- Render ---------------- */
+  const hoursByProjectBlock =
+    savedEntriesCount > 0 ? (
+      <div>
+        <Label>Hours by Project (today)</Label>
+        <ul className="mt-1 space-y-1">
+          {hoursByProject.map((p) => (
+            <li
+              key={p.name}
+              className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-1.5 text-sm"
+            >
+              <span>{p.name}</span>
+              <span className="font-semibold text-foreground">
+                {formatDuration(p.hours)}
+              </span>
+            </li>
+          ))}
+          <li className="flex items-center justify-between px-3 py-1 text-sm font-semibold">
+            <span>Total</span>
+            <span>{formatDuration(savedTotalHours)}</span>
+          </li>
+        </ul>
+      </div>
+    ) : null;
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       {/* Header */}
@@ -343,21 +454,21 @@ export function DashboardClient({
           tone={isLoggedOut ? "success" : "default"}
         />
         <StatCard
-          label="Logged Hours"
-          value={savedTotalHours}
+          label="Logged Time"
+          value={formatDuration(savedTotalHours)}
           hint={`${savedEntriesCount} ${
             savedEntriesCount === 1 ? "entry" : "entries"
           }`}
         />
         <StatCard
           label="Break Time"
-          value={`${totalBreakHours} h`}
+          value={formatDuration(totalBreakHours)}
           hint={`${breaks.length} ${breaks.length === 1 ? "break" : "breaks"}`}
           tone={onBreak ? "warning" : "default"}
         />
         <StatCard
           label="Net Active"
-          value={`${netActiveHours} h`}
+          value={formatDuration(netActiveHours)}
           hint="presence − breaks"
         />
         <Card className="p-5">
@@ -371,7 +482,161 @@ export function DashboardClient({
         </Card>
       </div>
 
-      {/* Mark Login */}
+      {/* Tabs */}
+      <div className="flex gap-1 rounded-lg border border-border bg-card p-1 text-sm">
+        {([
+          ["today", "🗓️ Today"],
+          ["work", "📝 Work Log"],
+          ["tasks", "✅ My Tasks"],
+        ] as const).map(([key, label]) => {
+          const badge =
+            key === "tasks"
+              ? tasks.filter((t) =>
+                  ["TODO", "IN_PROGRESS", "REJECTED"].includes(t.status)
+                ).length
+              : 0;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 font-medium transition-colors",
+                tab === key ? "bg-primary text-primary-foreground" : "hover:bg-accent"
+              )}
+            >
+              {label}
+              {badge > 0 && (
+                <span
+                  className={cn(
+                    "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs",
+                    tab === key ? "bg-primary-foreground/20" : "bg-primary/15 text-primary"
+                  )}
+                >
+                  {badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* My Tasks tab */}
+      {tab === "tasks" && tasks.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>My Tasks</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {taskError && (
+              <p className="mb-2 text-sm text-destructive">{taskError}</p>
+            )}
+            <div className="overflow-x-auto scroll-thin">
+              <table className="w-full min-w-[680px] text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <th className="px-2 py-2">Task</th>
+                    <th className="px-2 py-2">Project</th>
+                    <th className="px-2 py-2">Deadline</th>
+                    <th className="px-2 py-2 text-right">Hours</th>
+                    <th className="px-2 py-2">Status</th>
+                    <th className="px-2 py-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tasks.map((t) => {
+                    const isOverdue = t.isOverdue;
+                    const canSubmit =
+                      t.status === "TODO" ||
+                      t.status === "IN_PROGRESS" ||
+                      t.status === "REJECTED";
+                    return (
+                      <tr
+                        key={t.id}
+                        className={
+                          "border-b border-border align-top " +
+                          (isOverdue ? "bg-destructive/5" : "")
+                        }
+                      >
+                        <td className="px-2 py-2 font-medium text-foreground">
+                          {t.title}
+                          {t.status === "REJECTED" && t.reviewNote && (
+                            <p className="mt-0.5 text-xs font-normal text-destructive">
+                              ✗ {t.reviewNote}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 text-muted-foreground">
+                          {t.projectName}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">
+                          {formatDate(t.endDate)}
+                          {t.onHold && (
+                            <Badge tone="warning" className="ml-2">
+                              On Hold
+                            </Badge>
+                          )}
+                          {isOverdue && (
+                            <Badge tone="destructive" className="ml-2">
+                              {t.daysOverdue}d overdue
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 text-right tabular-nums text-foreground">
+                          {formatDuration(t.hoursWorked)}
+                        </td>
+                        <td className="px-2 py-2">
+                          <StatusBadge status={t.status} />
+                        </td>
+                        <td className="px-2 py-2">
+                          {t.status === "DONE" ? (
+                            <span className="text-xs font-medium text-[hsl(var(--success))]">
+                              ✓ Approved
+                            </span>
+                          ) : t.status === "IN_REVIEW" ? (
+                            <span className="text-xs font-medium text-[hsl(var(--warning))]">
+                              ⏳ Awaiting approval
+                            </span>
+                          ) : canSubmit ? (
+                            <Button
+                              size="sm"
+                              variant={t.status === "REJECTED" ? "outline" : "success"}
+                              onClick={() => submitTaskForReview(t.id)}
+                              disabled={taskPending === t.id}
+                            >
+                              {taskPending === t.id
+                                ? "…"
+                                : t.status === "REJECTED"
+                                ? "Resubmit"
+                                : "Mark Complete"}
+                            </Button>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Marking a task complete sends it to an admin for approval. If rejected,
+              you can resubmit it.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* My Tasks tab — empty state */}
+      {tab === "tasks" && tasks.length === 0 && (
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            No tasks have been assigned to you yet.
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Today tab — Mark Login */}
+      {tab === "today" && (
       <Card>
         <CardHeader>
           <CardTitle>Mark Login</CardTitle>
@@ -415,8 +680,10 @@ export function DashboardClient({
         </CardContent>
       </Card>
 
-      {/* Break / Lunch tracking */}
-      {isLoggedIn && !isLoggedOut && (
+      )}
+
+      {/* Today tab — Break / Lunch tracking */}
+      {tab === "today" && isLoggedIn && !isLoggedOut && (
         <Card className={onBreak ? "border-[hsl(var(--warning))]/50" : undefined}>
           <CardHeader>
             <CardTitle>Breaks &amp; Lunch</CardTitle>
@@ -451,7 +718,9 @@ export function DashboardClient({
               )}
               <span className="text-sm text-muted-foreground">
                 Total break time today:{" "}
-                <span className="font-semibold text-foreground">{totalBreakHours} h</span>
+                <span className="font-semibold text-foreground">
+                  {formatDuration(totalBreakHours)}
+                </span>
               </span>
             </div>
 
@@ -474,7 +743,7 @@ export function DashboardClient({
                       )}
                       {b.endAt && (
                         <span className="ml-2 text-foreground">
-                          ({round(hoursBetween(b.startAt, b.endAt))} h)
+                          ({formatDuration(hoursBetween(b.startAt, b.endAt))})
                         </span>
                       )}
                     </span>
@@ -486,7 +755,8 @@ export function DashboardClient({
         </Card>
       )}
 
-      {/* Project & Task Logging */}
+      {/* Work Log tab — Project & Task Logging */}
+      {tab === "work" && (
       <Card className={!isLoggedIn ? "opacity-60" : undefined}>
         <CardHeader>
           <CardTitle>Project &amp; Task Logging</CardTitle>
@@ -516,7 +786,12 @@ export function DashboardClient({
                     <Select
                       value={row.projectId}
                       onChange={(e) =>
-                        updateRow(row.key, { projectId: e.target.value })
+                        updateRow(row.key, {
+                          projectId: e.target.value,
+                          taskId: "",
+                          taskDescription: "",
+                          custom: false,
+                        })
                       }
                       disabled={isLoggedOut}
                     >
@@ -529,15 +804,70 @@ export function DashboardClient({
                     </Select>
                   </div>
                   <div>
-                    <Label className="md:hidden">Task Description</Label>
-                    <Input
-                      placeholder="What did you work on?"
-                      value={row.taskDescription}
-                      onChange={(e) =>
-                        updateRow(row.key, { taskDescription: e.target.value })
-                      }
-                      disabled={isLoggedOut}
-                    />
+                    <Label className="md:hidden">Task (assigned to you)</Label>
+                    {!row.projectId ? (
+                      <Select disabled value="">
+                        <option value="">Select a project first…</option>
+                      </Select>
+                    ) : row.custom || tasksForProject(row.projectId).length === 0 ? (
+                      <div className="space-y-1">
+                        <Input
+                          placeholder={
+                            tasksForProject(row.projectId).length === 0
+                              ? "No assigned task — describe your work"
+                              : "Describe the task"
+                          }
+                          value={row.taskDescription}
+                          onChange={(e) =>
+                            updateRow(row.key, { taskDescription: e.target.value })
+                          }
+                          disabled={isLoggedOut}
+                        />
+                        {tasksForProject(row.projectId).length > 0 && (
+                          <button
+                            type="button"
+                            className="text-xs text-primary hover:underline"
+                            onClick={() =>
+                              updateRow(row.key, { custom: false, taskDescription: "" })
+                            }
+                            disabled={isLoggedOut}
+                          >
+                            ← Choose an assigned task
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <Select
+                        value={row.taskId || ""}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === CUSTOM_TASK) {
+                            updateRow(row.key, {
+                              custom: true,
+                              taskId: "",
+                              taskDescription: "",
+                            });
+                          } else {
+                            const t = tasksForProject(row.projectId).find(
+                              (x) => x.id === v
+                            );
+                            updateRow(row.key, {
+                              taskId: v,
+                              taskDescription: t?.title ?? "",
+                            });
+                          }
+                        }}
+                        disabled={isLoggedOut}
+                      >
+                        <option value="">Select a task…</option>
+                        {tasksForProject(row.projectId).map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.title}
+                          </option>
+                        ))}
+                        <option value={CUSTOM_TASK}>✏️ Other (specify)…</option>
+                      </Select>
+                    )}
                   </div>
                   <div>
                     <Label className="md:hidden">Hours</Label>
@@ -580,7 +910,7 @@ export function DashboardClient({
                 <p className="text-sm text-muted-foreground">
                   Running total:{" "}
                   <span className="font-semibold text-foreground">
-                    {totalHours} h
+                    {formatDuration(totalHours)}
                   </span>
                 </p>
               </div>
@@ -607,7 +937,10 @@ export function DashboardClient({
         </CardContent>
       </Card>
 
-      {/* Mark Logout */}
+      )}
+
+      {/* Today tab — Mark Logout */}
+      {tab === "today" && (
       <Card className={!isLoggedIn ? "opacity-60" : undefined}>
         <CardHeader>
           <CardTitle>Mark Logout</CardTitle>
@@ -622,6 +955,7 @@ export function DashboardClient({
               <p className="inline-flex items-center gap-2 rounded-md bg-[hsl(var(--success))]/10 px-3 py-1.5 font-medium text-[hsl(var(--success))]">
                 ✓ Logged out at {formatTime(log?.logoutAt)}
               </p>
+              {hoursByProjectBlock}
               <div>
                 <Label>Overall Status</Label>
                 <div className="mt-1">
@@ -650,6 +984,7 @@ export function DashboardClient({
                   Tip: save at least one work entry before marking logout.
                 </p>
               )}
+              {hoursByProjectBlock}
               <div>
                 <Label htmlFor="workCompleted">Work Completed Today</Label>
                 <Textarea
@@ -694,6 +1029,7 @@ export function DashboardClient({
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }
