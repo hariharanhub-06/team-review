@@ -8,6 +8,7 @@ export function LoginForm() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -59,17 +60,29 @@ export function LoginForm() {
 
       <div>
         <Label htmlFor="password">Password</Label>
-        <Input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          placeholder="••••••••"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          disabled={pending}
-        />
+        <div className="relative">
+          <Input
+            id="password"
+            name="password"
+            type={showPassword ? "text" : "password"}
+            autoComplete="current-password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            disabled={pending}
+            className="pr-10"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            title={showPassword ? "Hide password" : "Show password"}
+            className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {showPassword ? "🙈" : "👁️"}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -84,19 +97,6 @@ export function LoginForm() {
       <Button type="submit" className="w-full" size="lg" disabled={pending}>
         {pending ? "Signing in…" : "Sign in"}
       </Button>
-
-      <div className="rounded-md border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
-        <p className="mb-1 font-medium text-foreground">Demo credentials</p>
-        <p>
-          Admin: <span className="font-mono">hariharanjeyaramamoorthy@gmail.com</span>
-        </p>
-        <p>
-          Member: <span className="font-mono">alice@teams.local</span>
-        </p>
-        <p>
-          Password: <span className="font-mono">password123</span>
-        </p>
-      </div>
     </form>
   );
 }
