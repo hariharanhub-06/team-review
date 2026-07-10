@@ -732,8 +732,8 @@ export function DashboardClient({
         </Card>
       )}
 
-      {/* Work Log tab — Project & Task Logging */}
-      {tab === "work" && (
+      {/* Project & Task Logging — shown on Today (above Mark Logout) and the Work Log tab */}
+      {(tab === "work" || tab === "today") && (
       <Card className={!isLoggedIn ? "opacity-60" : undefined}>
         <CardHeader>
           <CardTitle>Project &amp; Task Logging</CardTitle>
