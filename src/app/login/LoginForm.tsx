@@ -24,11 +24,12 @@ export function LoginForm() {
       });
 
       const data = (await res.json().catch(() => null)) as
-        | { role?: "ADMIN" | "MEMBER"; error?: string }
+        | { role?: "ADMIN" | "MEMBER"; error?: string; detail?: string }
         | null;
 
       if (!res.ok || !data?.role) {
-        setError(data?.error ?? "Unable to sign in. Please try again.");
+        const msg = data?.error ?? "Unable to sign in. Please try again.";
+        setError(data?.detail ? `${msg} (${data.detail})` : msg);
         setPending(false);
         return;
       }
