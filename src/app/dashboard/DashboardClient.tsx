@@ -16,7 +16,15 @@ import {
   StatusBadge,
   Textarea,
 } from "@/components/ui";
-import { cn, formatDate, formatDuration, formatTime, hoursBetween, round } from "@/lib/utils";
+import {
+  cn,
+  formatDate,
+  formatDuration,
+  formatDurationPrecise,
+  formatTime,
+  hoursBetween,
+  round,
+} from "@/lib/utils";
 
 /* ---------------- Types ---------------- */
 type DayStatus = "COMPLETED" | "IN_PROGRESS" | "BLOCKED";
@@ -217,10 +225,6 @@ export function DashboardClient({
   // Reminder banner
   const [reminderDismissed, setReminderDismissed] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(id);
-  }, []);
 
   const isLoggedIn = !!log?.loginAt;
   const isLoggedOut = !!log?.logoutAt;
@@ -271,25 +275,32 @@ export function DashboardClient({
   const openBreak = useMemo(() => breaks.find((b) => b.endAt === null) ?? null, [breaks]);
   const onBreak = !!openBreak;
 
+  // Tick every second while a break is running so the live counter actually moves;
+  // otherwise once a minute is plenty.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), onBreak ? 1_000 : 60_000);
+    return () => clearInterval(id);
+  }, [onBreak]);
+
+  // NOTE: keep full precision here — rounding to 1 decimal of an HOUR would snap the
+  // value to 6-minute steps, making a live break look frozen (e.g. stuck on "6m").
   const totalBreakHours = useMemo(() => {
-    return round(
-      breaks.reduce((sum, b) => {
-        // An open break ends at logout (if logged out) or "now" (still active).
-        const end = b.endAt
-          ? new Date(b.endAt)
-          : log?.logoutAt
-          ? new Date(log.logoutAt)
-          : new Date(now);
-        return sum + hoursBetween(b.startAt, end);
-      }, 0)
-    );
+    return breaks.reduce((sum, b) => {
+      // An open break ends at logout (if logged out) or "now" (still active).
+      const end = b.endAt
+        ? new Date(b.endAt)
+        : log?.logoutAt
+        ? new Date(log.logoutAt)
+        : new Date(now);
+      return sum + hoursBetween(b.startAt, end);
+    }, 0);
   }, [breaks, now, log]);
 
-  // Net active presence = login duration minus break time (only when logged out).
+  // Net active presence = login duration minus break time. Full precision (see above).
   const netActiveHours = useMemo(() => {
     if (!log?.loginAt) return 0;
     const end = log.logoutAt ? new Date(log.logoutAt) : new Date(now);
-    return round(Math.max(0, hoursBetween(log.loginAt, end) - totalBreakHours));
+    return Math.max(0, hoursBetween(log.loginAt, end) - totalBreakHours);
   }, [log, now, totalBreakHours]);
 
   const showReminder =
@@ -482,13 +493,13 @@ export function DashboardClient({
         />
         <StatCard
           label="Break Time"
-          value={formatDuration(totalBreakHours)}
+          value={formatDurationPrecise(totalBreakHours)}
           hint={`${breaks.length} ${breaks.length === 1 ? "break" : "breaks"}`}
           tone={onBreak ? "warning" : "default"}
         />
         <StatCard
           label="Net Active"
-          value={formatDuration(netActiveHours)}
+          value={formatDurationPrecise(netActiveHours)}
           hint={onBreak ? "on break…" : "presence − breaks"}
           tone={onBreak ? "warning" : "default"}
         />
@@ -700,8 +711,8 @@ export function DashboardClient({
               )}
               <span className="text-sm text-muted-foreground">
                 Total break time today:{" "}
-                <span className="font-semibold text-foreground">
-                  {formatDuration(totalBreakHours)}
+                <span className="font-semibold tabular-nums text-foreground">
+                  {formatDurationPrecise(totalBreakHours)}
                 </span>
               </span>
             </div>
@@ -723,11 +734,18 @@ export function DashboardClient({
                       ) : (
                         <span className="text-[hsl(var(--warning))]">ongoing</span>
                       )}
-                      {b.endAt && (
-                        <span className="ml-2 text-foreground">
-                          ({formatDuration(hoursBetween(b.startAt, b.endAt))})
-                        </span>
-                      )}
+                      <span
+                        className={cn(
+                          "ml-2 tabular-nums",
+                          b.endAt ? "text-foreground" : "font-semibold text-[hsl(var(--warning))]"
+                        )}
+                      >
+                        (
+                        {formatDurationPrecise(
+                          hoursBetween(b.startAt, b.endAt ? new Date(b.endAt) : new Date(now))
+                        )}
+                        )
+                      </span>
                     </span>
                   </li>
                 ))}
