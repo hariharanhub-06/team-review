@@ -7,8 +7,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let admin;
   try {
-    await requireAdmin();
+    admin = await requireAdmin();
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;
@@ -79,6 +80,27 @@ export async function PATCH(
       assignee: { select: { id: true, name: true } },
     },
   });
+
+  // Record the review-cycle event so the task's back-and-forth history is auditable.
+  if (data.status !== undefined && data.status !== existing.status) {
+    const eventType =
+      data.status === "DONE"
+        ? "APPROVED"
+        : data.status === "REJECTED"
+        ? "REJECTED"
+        : data.status === "IN_REVIEW"
+        ? "SUBMITTED"
+        : "REOPENED";
+    await prisma.taskEvent.create({
+      data: {
+        taskId: id,
+        type: eventType,
+        note: data.reviewNote ?? null,
+        actorId: admin.sub,
+        actorName: admin.name,
+      },
+    });
+  }
 
   return Response.json({ task });
 }

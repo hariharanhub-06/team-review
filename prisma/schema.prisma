@@ -32,6 +32,14 @@ enum BreakType {
   OTHER
 }
 
+enum TaskEventType {
+  SUBMITTED
+  APPROVED
+  REJECTED
+  WITHDRAWN
+  REOPENED
+}
+
 model User {
   id                 String     @id @default(cuid())
   name               String
@@ -111,8 +119,25 @@ model Task {
   createdAt   DateTime    @default(now())
 
   workEntries WorkEntry[]
+  events      TaskEvent[]
 
   @@index([projectId])
+}
+
+/// Audit trail of a task's review cycle (submit -> approve/reject -> resubmit...).
+/// Powers the admin notification feed and the "how many times did this bounce" history.
+model TaskEvent {
+  id        String        @id @default(cuid())
+  taskId    String
+  task      Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  type      TaskEventType
+  note      String?
+  actorId   String?
+  actorName String?
+  createdAt DateTime      @default(now())
+
+  @@index([taskId])
+  @@index([createdAt])
 }
 
 model WorkEntry {

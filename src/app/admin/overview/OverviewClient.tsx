@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import {
+  Badge,
   Button,
   Input,
   Select,
@@ -11,7 +12,7 @@ import {
   StatCard,
   StatusBadge,
 } from "@/components/ui";
-import { formatDate, formatTime, formatDurationPrecise, round } from "@/lib/utils";
+import { formatDate, formatTime, formatDurationPrecise } from "@/lib/utils";
 
 interface Option {
   id: string;
@@ -32,6 +33,12 @@ interface Entry {
   hours: number;
 }
 
+interface BreakItem {
+  type: string;
+  startAt: string;
+  endAt: string | null;
+}
+
 interface Row {
   id: string;
   date: string;
@@ -49,6 +56,7 @@ interface Row {
   remarks: string | null;
   totalWorkHours: number;
   entries: Entry[];
+  breaks: BreakItem[];
 }
 
 interface Summary {
@@ -88,6 +96,199 @@ function buildQuery(f: Filters): string {
   if (f.from) params.set("from", f.from);
   if (f.to) params.set("to", f.to);
   return params.toString();
+}
+
+const BREAK_LABELS: Record<string, string> = {
+  LUNCH: "Lunch",
+  SHORT: "Short break",
+  OTHER: "Other",
+};
+
+function breakLabel(type: string): string {
+  return BREAK_LABELS[type] ?? "Other";
+}
+
+/** Elapsed hours of a break; 0 while it is still ongoing. */
+function breakElapsedHours(b: BreakItem): number {
+  if (!b.endAt) return 0;
+  const ms = new Date(b.endAt).getTime() - new Date(b.startAt).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return ms / 3_600_000;
+}
+
+/** One labelled free-text block from the member's login/logout forms. */
+function NoteBlock({ title, text }: { title: string; text: string }) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </div>
+      <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm whitespace-pre-wrap break-words text-foreground">
+        {text}
+      </div>
+    </div>
+  );
+}
+
+/** Expanded day-detail: notes, work-hour split, and breaks. */
+function RowDetail({ row }: { row: Row }) {
+  const notes: { title: string; text: string }[] = [
+    { title: "Planned Work (at login)", text: row.plannedWork?.trim() ?? "" },
+    { title: "Work Completed (at logout)", text: row.workCompleted?.trim() ?? "" },
+    { title: "Remarks", text: row.remarks?.trim() ?? "" },
+  ].filter((n) => n.text.length > 0);
+
+  const entries = row.entries ?? [];
+  const breaks = row.breaks ?? [];
+  const total = row.totalWorkHours > 0 ? row.totalWorkHours : 0;
+
+  return (
+    <div className="space-y-5 px-2 py-4">
+      {/* Session summary */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs">
+        <span className="text-muted-foreground">
+          Login:{" "}
+          <span className="font-medium text-foreground">
+            {row.loginAt ? formatTime(row.loginAt) : "—"}
+          </span>
+        </span>
+        <span className="text-muted-foreground">
+          Logout:{" "}
+          <span className="font-medium text-foreground">
+            {row.logoutAt ? formatTime(row.logoutAt) : "—"}
+          </span>
+        </span>
+        <span className="text-muted-foreground">
+          Break total:{" "}
+          <span className="font-medium text-[hsl(var(--warning))]">
+            {formatDurationPrecise(row.breakHours)}
+          </span>
+        </span>
+        <span className="text-muted-foreground">
+          Net active:{" "}
+          <span className="font-medium text-foreground">
+            {row.sessionStatus === "UNCALCULATED"
+              ? "—"
+              : formatDurationPrecise(row.netActiveHours)}
+          </span>
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {/* (A) Notes */}
+        <div className="space-y-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+            Notes
+          </h4>
+          {notes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No notes recorded.</p>
+          ) : (
+            <div className="space-y-3">
+              {notes.map((n) => (
+                <NoteBlock key={n.title} title={n.title} text={n.text} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* (B) Work-hours split */}
+        <div className="space-y-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+            Work hours split
+          </h4>
+          {entries.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No work entries logged.</p>
+          ) : (
+            <div className="overflow-x-auto scroll-thin rounded-md border border-border">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30 text-left uppercase tracking-wide text-muted-foreground">
+                    <th className="px-3 py-2 font-medium">Project</th>
+                    <th className="px-3 py-2 font-medium">Task</th>
+                    <th className="px-3 py-2 text-right font-medium">Hours</th>
+                    <th className="w-32 px-3 py-2 font-medium">Share</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((entry, i) => {
+                    const pct = total > 0 ? (entry.hours / total) * 100 : 0;
+                    return (
+                      <tr key={i} className="border-b border-border last:border-0">
+                        <td className="px-3 py-2 font-medium text-foreground">
+                          {entry.project}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground break-words">
+                          {entry.taskDescription}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-foreground">
+                          {formatDurationPrecise(entry.hours)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className="h-full rounded-full bg-primary"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <span className="w-10 shrink-0 text-right tabular-nums text-muted-foreground">
+                              {Math.round(pct)}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-border bg-muted/30 font-semibold text-foreground">
+                    <td className="px-3 py-2" colSpan={2}>
+                      Total
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                      {formatDurationPrecise(row.totalWorkHours)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                      100%
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* (C) Breaks */}
+      <div className="space-y-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+          Breaks
+        </h4>
+        {breaks.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No breaks taken.</p>
+        ) : (
+          <ul className="space-y-1">
+            {breaks.map((b, i) => (
+              <li
+                key={i}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs"
+              >
+                <Badge tone="warning">{breakLabel(b.type)}</Badge>
+                <span className="tabular-nums text-muted-foreground">
+                  {formatTime(b.startAt)} → {b.endAt ? formatTime(b.endAt) : "ongoing"}
+                </span>
+                {b.endAt && (
+                  <span className="ml-auto tabular-nums font-medium text-[hsl(var(--warning))]">
+                    {formatDurationPrecise(breakElapsedHours(b))}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function OverviewClient({
@@ -285,29 +486,27 @@ export default function OverviewClient({
                 <tbody>
                   {rows.map((row) => {
                     const isOpen = expanded.has(row.id);
-                    const hasEntries = row.entries.length > 0;
                     return (
                       <Fragment key={row.id}>
                         <tr className="border-b border-border align-top hover:bg-accent/50">
                           <td className="px-2 py-2">
-                            {hasEntries && (
-                              <button
-                                type="button"
-                                onClick={() => toggle(row.id)}
-                                aria-label={isOpen ? "Collapse" : "Expand"}
-                                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted"
+                            <button
+                              type="button"
+                              onClick={() => toggle(row.id)}
+                              aria-expanded={isOpen}
+                              aria-label={isOpen ? "Collapse details" : "Expand details"}
+                              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted"
+                            >
+                              <span
+                                className={
+                                  isOpen
+                                    ? "rotate-90 transition-transform"
+                                    : "transition-transform"
+                                }
                               >
-                                <span
-                                  className={
-                                    isOpen
-                                      ? "rotate-90 transition-transform"
-                                      : "transition-transform"
-                                  }
-                                >
-                                  ▶
-                                </span>
-                              </button>
-                            )}
+                                ▶
+                              </span>
+                            </button>
                           </td>
                           <td className="whitespace-nowrap px-2 py-2 text-foreground">
                             {formatDate(row.date)}
@@ -346,28 +545,11 @@ export default function OverviewClient({
                             <StatusBadge status={row.sessionStatus} />
                           </td>
                         </tr>
-                        {isOpen && hasEntries && (
-                          <tr className="border-b border-border bg-muted/30">
-                            <td />
-                            <td colSpan={7} className="px-2 py-2">
-                              <ul className="space-y-1">
-                                {row.entries.map((entry, i) => (
-                                  <li
-                                    key={i}
-                                    className="flex flex-wrap items-center gap-x-2 text-xs"
-                                  >
-                                    <span className="font-medium text-foreground">
-                                      {entry.project}
-                                    </span>
-                                    <span className="text-muted-foreground">
-                                      — {entry.taskDescription}
-                                    </span>
-                                    <span className="ml-auto tabular-nums text-muted-foreground">
-                                      {round(entry.hours)}h
-                                    </span>
-                                  </li>
-                                ))}
-                              </ul>
+                        {isOpen && (
+                          <tr className="border-b border-border bg-muted/20">
+                            {/* 10 columns in the header above */}
+                            <td colSpan={10} className="p-0">
+                              <RowDetail row={row} />
                             </td>
                           </tr>
                         )}

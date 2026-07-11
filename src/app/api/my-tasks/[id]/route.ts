@@ -46,6 +46,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       where: { id },
       data: { status: "IN_REVIEW", submittedAt: new Date(), reviewNote: null },
     });
+    await prisma.taskEvent.create({
+      data: {
+        taskId: id,
+        type: "SUBMITTED",
+        actorId: user.sub,
+        actorName: user.name,
+      },
+    });
     return Response.json({ task: updated });
   }
 
@@ -56,6 +64,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const updated = await prisma.task.update({
     where: { id },
     data: { status: "IN_PROGRESS", submittedAt: null },
+  });
+  await prisma.taskEvent.create({
+    data: {
+      taskId: id,
+      type: "WITHDRAWN",
+      actorId: user.sub,
+      actorName: user.name,
+    },
   });
   return Response.json({ task: updated });
 }

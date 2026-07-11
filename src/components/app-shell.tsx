@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
+import { NotificationBell } from "./notification-bell";
 import { Button } from "./ui";
 
 export interface NavItem {
@@ -25,6 +26,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin", label: "Overview", icon: "🏠" },
   { href: "/admin/users", label: "Users", icon: "👥" },
   { href: "/admin/projects", label: "Projects", icon: "📁" },
+  { href: "/admin/tasks", label: "Tasks", icon: "🗂️" },
   { href: "/admin/overview", label: "Work Logs", icon: "📋" },
   { href: "/admin/analytics", label: "Analytics", icon: "📈" },
   { href: "/admin/account", label: "Account", icon: "🔒" },
@@ -119,6 +121,7 @@ export function AppShell({
           </Button>
           <div className="flex-1" />
           <div className="flex items-center gap-2">
+            {role === "ADMIN" && <NotificationBell />}
             <ThemeToggle />
             <Button variant="outline" size="sm" onClick={logout}>
               Logout
