@@ -304,6 +304,81 @@ export default function OverviewClient({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  /** Delete a member's whole day entry so they can re-do it. */
+  async function deleteEntry(row: Row) {
+    if (
+      !window.confirm(
+        `Delete ${row.userName}'s entry for ${formatDate(row.date)}?\n\n` +
+          `This removes their login, logout, notes, work entries and breaks for that day. ` +
+          `They will need to mark login again.`
+      )
+    )
+      return;
+    setBusyId(row.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/logs/${row.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error ?? "Failed to delete entry");
+      }
+      setRows((prev) => prev.filter((r) => r.id !== row.id));
+      setSummary((prev) => ({
+        totalLogs: Math.max(0, prev.totalLogs - 1),
+        totalHours: Math.max(0, prev.totalHours - row.totalWorkHours),
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete entry");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** Undo a mistaken logout so the member can carry on and log out properly. */
+  async function undoLogout(row: Row) {
+    if (
+      !window.confirm(
+        `Undo ${row.userName}'s logout for ${formatDate(row.date)}?\n\n` +
+          `Their login and work entries are kept — only the logout (and the logout notes) are cleared, ` +
+          `so they can continue and mark logout again.`
+      )
+    )
+      return;
+    setBusyId(row.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/logs/${row.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "undoLogout" }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error ?? "Failed to undo logout");
+      }
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === row.id
+            ? {
+                ...r,
+                logoutAt: null,
+                workCompleted: null,
+                remarks: null,
+                sessionStatus: "ACTIVE",
+                loginHours: 0,
+                netActiveHours: 0,
+              }
+            : r
+        )
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to undo logout");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   const load = useCallback(async (f: Filters) => {
     setLoading(true);
@@ -468,7 +543,7 @@ export default function OverviewClient({
             </p>
           ) : (
             <div className="overflow-x-auto scroll-thin">
-              <table className="w-full min-w-[720px] text-sm">
+              <table className="w-full min-w-[860px] text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
                     <th className="w-8 px-2 py-2" />
@@ -481,6 +556,7 @@ export default function OverviewClient({
                     <th className="px-2 py-2 text-right">Net Active</th>
                     <th className="px-2 py-2 text-right">Work Hours</th>
                     <th className="px-2 py-2">Status</th>
+                    <th className="px-2 py-2 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -544,11 +620,37 @@ export default function OverviewClient({
                           <td className="px-2 py-2">
                             <StatusBadge status={row.sessionStatus} />
                           </td>
+                          <td className="px-2 py-2">
+                            <div className="flex items-center justify-end gap-1">
+                              {row.logoutAt && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title="Undo logout (keeps login & work entries)"
+                                  aria-label="Undo logout"
+                                  disabled={busyId === row.id}
+                                  onClick={() => undoLogout(row)}
+                                >
+                                  ↩️
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title="Delete this day's entry so the member can redo it"
+                                aria-label="Delete entry"
+                                disabled={busyId === row.id}
+                                onClick={() => deleteEntry(row)}
+                              >
+                                🗑
+                              </Button>
+                            </div>
+                          </td>
                         </tr>
                         {isOpen && (
                           <tr className="border-b border-border bg-muted/20">
-                            {/* 10 columns in the header above */}
-                            <td colSpan={10} className="p-0">
+                            {/* 11 columns in the header above */}
+                            <td colSpan={11} className="p-0">
                               <RowDetail row={row} />
                             </td>
                           </tr>
