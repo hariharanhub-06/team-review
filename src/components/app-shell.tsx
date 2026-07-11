@@ -6,6 +6,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
 import { NotificationBell } from "./notification-bell";
+import { Logo } from "./logo";
 import { Button } from "./ui";
 
 export interface NavItem {
@@ -76,9 +77,8 @@ export function AppShell({
           open ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="flex h-16 items-center gap-2 border-b border-border px-5">
-          <span className="text-xl">⚡</span>
-          <span className="font-semibold">Team Tracker</span>
+        <div className="flex h-16 items-center border-b border-border px-4">
+          <Logo size={34} />
         </div>
         <nav className="space-y-1 p-3">
           {nav.map((item) => {

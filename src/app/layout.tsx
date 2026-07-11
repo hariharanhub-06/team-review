@@ -3,8 +3,9 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 
 export const metadata: Metadata = {
-  title: "Team Work Tracker",
-  description: "Team work tracking and productivity management",
+  title: "HH Team — Engineering Work Tracker",
+  description:
+    "HH Team work tracking and productivity management for engineering projects",
 };
 
 export default function RootLayout({

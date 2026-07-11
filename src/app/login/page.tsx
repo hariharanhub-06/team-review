@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LogoMark } from "@/components/logo";
 import { Card, CardContent } from "@/components/ui";
 import { LoginForm } from "./LoginForm";
 
@@ -29,11 +30,15 @@ export default async function LoginPage() {
       </div>
 
       <div className="w-full max-w-sm">
-        <div className="mb-6 text-center">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            ⚡ Team Work Tracker
+        <div className="mb-6 flex flex-col items-center text-center">
+          <LogoMark size={64} className="drop-shadow-lg" />
+          <h1 className="mt-4 text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            HH <span className="text-primary">Team</span>
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+            Engineering Work Tracker
+          </p>
+          <p className="mt-3 text-sm text-muted-foreground">
             Sign in to plan your day and track your team&apos;s progress.
           </p>
         </div>
