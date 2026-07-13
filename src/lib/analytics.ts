@@ -1,7 +1,12 @@
 import { prisma } from "./db";
 import { hoursBetween, round } from "./utils";
-import { computeScore, workingDaysBetween, type ScoreBreakdown } from "./scoring";
+import { computeScore, type ScoreBreakdown } from "./scoring";
 import { taskOverdue } from "./tasks";
+
+/** Calendar date of a timestamp, as YYYY-MM-DD. Sorts and compares lexicographically. */
+function dayKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
 
 export interface AnalyticsFilters {
   from: Date;
@@ -21,6 +26,7 @@ export interface UserMetric {
   loginHours: number;
   daysLogged: number;
   workingDays: number;
+  absentDays: number;
   projectCount: number;
   projects: { projectId: string; name: string; hours: number }[];
   dailySeries: { date: string; hours: number; loginHours: number }[];
@@ -88,12 +94,43 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
     },
   });
 
-  const workingDays = Math.max(1, workingDaysBetween(from, to));
+  // Attendance is observed, not read off a calendar. A date is a working day if
+  // ANY active member logged in on it; a date nobody logged in on is a holiday.
+  // This query deliberately ignores the userId/status/project filters — narrowing
+  // the view to one member must not shrink the team's working-day calendar, or a
+  // member who showed up once would score a perfect 1/1 on consistency.
+  const attendanceLogs = await prisma.dailyLog.findMany({
+    where: {
+      date: { gte: from, lte: to },
+      user: { role: "MEMBER", active: true },
+    },
+    select: {
+      userId: true,
+      date: true,
+      loginAt: true,
+      _count: { select: { workEntries: true } },
+    },
+  });
+
+  const workingDayKeys = new Set<string>();
+  const presentDays = new Map<string, Set<string>>();
+  for (const log of attendanceLogs) {
+    // A row with no login and no work is an empty shell, not an appearance.
+    if (!log.loginAt && log._count.workEntries === 0) continue;
+    const key = dayKey(log.date);
+    workingDayKeys.add(key);
+    let mine = presentDays.get(log.userId);
+    if (!mine) {
+      mine = new Set();
+      presentDays.set(log.userId, mine);
+    }
+    mine.add(key);
+  }
+  const workingDayList = [...workingDayKeys];
 
   type UserAgg = {
     totalHours: number;
     loginHours: number;
-    daysLogged: number;
     projects: Map<string, { name: string; hours: number }>;
     daily: Map<string, { hours: number; loginHours: number }>;
   };
@@ -104,7 +141,7 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
   function ensureAgg(id: string): UserAgg {
     let a = perUserMap.get(id);
     if (!a) {
-      a = { totalHours: 0, loginHours: 0, daysLogged: 0, projects: new Map(), daily: new Map() };
+      a = { totalHours: 0, loginHours: 0, projects: new Map(), daily: new Map() };
       perUserMap.set(id, a);
     }
     return a;
@@ -116,9 +153,8 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
     const loginHours = hoursBetween(log.loginAt, log.logoutAt);
     agg.totalHours += entryHours;
     agg.loginHours += loginHours;
-    if (log.loginAt || log.workEntries.length > 0) agg.daysLogged += 1;
 
-    const key = log.date.toISOString().slice(0, 10);
+    const key = dayKey(log.date);
     agg.daily.set(key, {
       hours: (agg.daily.get(key)?.hours ?? 0) + entryHours,
       loginHours: (agg.daily.get(key)?.loginHours ?? 0) + loginHours,
@@ -212,6 +248,16 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
     const ts =
       perUserTaskStats.get(u.id) ??
       { completed: 0, onTime: 0, overdue: 0, critCompleted: 0, critAssigned: 0 };
+    // A member is only accountable for working days on or after they joined, so
+    // starting mid-period doesn't bury them in absences for days they didn't exist.
+    // The `present` clause is a safety net for logs backdated before createdAt
+    // (seed data): a day you showed up for is a working day for you, full stop.
+    const joinedKey = dayKey(u.createdAt);
+    const present = presentDays.get(u.id) ?? new Set<string>();
+    const workingDays = workingDayList.filter((d) => d >= joinedKey || present.has(d)).length;
+    const daysLogged = present.size;
+    const absentDays = workingDays - daysLogged;
+
     const expectedHours = u.expectedDailyHours * workingDays;
     const totalHours = agg?.totalHours ?? 0;
     const breakdown = computeScore({
@@ -219,7 +265,7 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
       expectedHours,
       tasksCompleted: ts.completed,
       tasksCompletedOnTime: ts.onTime,
-      daysLogged: agg?.daysLogged ?? 0,
+      daysLogged,
       workingDays,
       criticalityCompleted: ts.critCompleted,
       criticalityAssigned: ts.critAssigned,
@@ -242,8 +288,9 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
       totalHours: round(totalHours),
       expectedHours: round(expectedHours),
       loginHours: round(agg?.loginHours ?? 0),
-      daysLogged: agg?.daysLogged ?? 0,
+      daysLogged,
       workingDays,
+      absentDays,
       projectCount: projects.length,
       projects,
       dailySeries,

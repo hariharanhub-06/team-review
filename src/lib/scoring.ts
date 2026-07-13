@@ -7,6 +7,10 @@
  *   - consistency: days logged vs working days in period     (weight 0.20)
  *   - impact:      criticality points delivered vs assigned  (weight 0.20)
  *
+ * "Working days" are observed, not derived from a calendar: a date counts as a
+ * working day if *any* member logged in that day, and a date nobody logged in on
+ * is a holiday that penalises no one. See buildAttendance() in analytics.ts.
+ *
  * Impact is what makes a hard task worth more than an easy one: every task
  * carries a 1–10 criticality, and impact is the share of a member's assigned
  * criticality points that they actually finished. Ten trivial tasks (1 pt each)
@@ -103,17 +107,3 @@ export function scoreLabel(score: number): { label: string; tone: "success" | "w
   return { label: "Needs attention", tone: "destructive" };
 }
 
-/** Count weekdays (Mon–Fri) between two dates inclusive. */
-export function workingDaysBetween(start: Date, end: Date): number {
-  let count = 0;
-  const d = new Date(start);
-  d.setUTCHours(0, 0, 0, 0);
-  const last = new Date(end);
-  last.setUTCHours(0, 0, 0, 0);
-  while (d <= last) {
-    const day = d.getUTCDay();
-    if (day !== 0 && day !== 6) count++;
-    d.setUTCDate(d.getUTCDate() + 1);
-  }
-  return count;
-}

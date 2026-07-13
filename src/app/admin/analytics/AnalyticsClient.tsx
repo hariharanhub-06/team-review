@@ -51,6 +51,7 @@ interface UserMetric {
   loginHours: number;
   daysLogged: number;
   workingDays: number;
+  absentDays: number;
   projectCount: number;
   projects: ProjectHours[];
   dailySeries: DailyPoint[];
@@ -515,6 +516,12 @@ export function AnalyticsClient({
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         {u.daysLogged}/{u.workingDays}
+                        {u.absentDays > 0 && (
+                          <span className="text-xs text-destructive">
+                            {" "}
+                            ({u.absentDays} absent)
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3">{u.projectCount}</td>
                       <td className="px-4 py-3 whitespace-nowrap">
@@ -684,6 +691,11 @@ function MemberDetail({ member, onBack }: { member: UserMetric; onBack: () => vo
           <StatCard
             label="Days Logged"
             value={`${member.daysLogged}/${member.workingDays}`}
+            hint={
+              member.absentDays > 0
+                ? `${member.absentDays} absent`
+                : "full attendance"
+            }
           />
         </div>
 
