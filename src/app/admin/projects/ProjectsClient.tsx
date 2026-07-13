@@ -137,7 +137,9 @@ function Modal({
       <div
         className={cn(
           "w-full rounded-lg border border-border bg-card shadow-lg",
-          wide ? "max-w-3xl" : "max-w-lg"
+          // The task table needs real width — otherwise the title column
+          // collapses to one word per line and every edit needs a sideways scroll.
+          wide ? "max-w-[min(96vw,1400px)]" : "max-w-lg"
         )}
         onClick={(e) => e.stopPropagation()}
       >
@@ -709,10 +711,10 @@ function ManageTasks({
             No tasks yet.
           </p>
         ) : (
-          <table className="w-full min-w-[640px] border-collapse text-sm">
+          <table className="w-full min-w-[880px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase text-muted-foreground">
-                <th className="py-2 pr-3 font-medium">Title</th>
+                <th className="w-[28%] min-w-[220px] py-2 pr-3 font-medium">Title</th>
                 <th className="py-2 pr-3 font-medium">Dates</th>
                 <th
                   className="py-2 pr-3 font-medium"
@@ -743,7 +745,7 @@ function ManageTasks({
                     <td className="py-2 pr-3">
                       {editing ? (
                         <Input
-                          className="h-8 w-[180px] py-1 text-xs"
+                          className="h-8 w-full py-1 text-xs"
                           value={editForm.title}
                           disabled={busyId === t.id}
                           aria-label="Task title"
