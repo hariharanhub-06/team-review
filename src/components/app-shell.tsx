@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
 import { NotificationBell } from "./notification-bell";
 import { Logo } from "./logo";
+import { InstallButton } from "./pwa";
 import { Button } from "./ui";
 
 export interface NavItem {
@@ -121,6 +122,7 @@ export function AppShell({
           </Button>
           <div className="flex-1" />
           <div className="flex items-center gap-2">
+            <InstallButton />
             {role === "ADMIN" && <NotificationBell />}
             <ThemeToggle />
             <Button variant="outline" size="sm" onClick={logout}>
