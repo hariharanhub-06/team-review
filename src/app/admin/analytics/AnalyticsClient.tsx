@@ -21,7 +21,7 @@ import {
   CHART_COLORS,
 } from "@/components/charts";
 import { formatDate, cn } from "@/lib/utils";
-import { scoreLabel } from "@/lib/scoring";
+import { scoreLabel, criticalityLabel } from "@/lib/scoring";
 
 /* ---------------- Types (mirror AnalyticsResult) ---------------- */
 interface ScoreBreakdown {
@@ -29,6 +29,7 @@ interface ScoreBreakdown {
   effort: number;
   timeliness: number;
   consistency: number;
+  impact: number;
 }
 interface ProjectHours {
   projectId: string;
@@ -56,6 +57,8 @@ interface UserMetric {
   tasksCompleted: number;
   tasksCompletedOnTime: number;
   overdueTasks: number;
+  criticalityCompleted: number;
+  criticalityAssigned: number;
   breakdown: ScoreBreakdown;
   rank: number;
 }
@@ -78,6 +81,7 @@ interface Analytics {
     project: string;
     assignee: string | null;
     endDate: string | null;
+    criticality: number;
     daysOverdue: number;
   }[];
   totals: {
@@ -493,6 +497,16 @@ export function AnalyticsClient({
                               {pct(u.breakdown.consistency)}
                             </span>
                           </div>
+                          <div
+                            className="flex items-center gap-2 text-xs"
+                            title={`${u.criticalityCompleted} of ${u.criticalityAssigned} criticality points delivered`}
+                          >
+                            <span className="w-16 text-muted-foreground">Impact</span>
+                            <MiniBar value={u.breakdown.impact} color={CHART_COLORS[2]} />
+                            <span className="w-9 text-right tabular-nums">
+                              {pct(u.breakdown.impact)}
+                            </span>
+                          </div>
                         </div>
                       </td>
                       <td className="px-4 py-3 font-medium whitespace-nowrap">{u.totalHours}h</td>
@@ -597,16 +611,24 @@ export function AnalyticsClient({
                     <th className="px-4 py-3 font-medium">Task</th>
                     <th className="px-4 py-3 font-medium">Project</th>
                     <th className="px-4 py-3 font-medium">Assignee</th>
+                    <th className="px-4 py-3 font-medium">Criticality</th>
                     <th className="px-4 py-3 font-medium">Due</th>
                     <th className="px-4 py-3 font-medium">Overdue</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.overdueTasks.map((t) => (
+                  {data.overdueTasks.map((t) => {
+                    const cl = criticalityLabel(t.criticality);
+                    return (
                     <tr key={t.id} className="border-b border-border last:border-0">
                       <td className="px-4 py-3 font-medium">{t.title}</td>
                       <td className="px-4 py-3 text-muted-foreground">{t.project}</td>
                       <td className="px-4 py-3 text-muted-foreground">{t.assignee ?? "—"}</td>
+                      <td className="px-4 py-3">
+                        <Badge tone={cl.tone}>
+                          {t.criticality} · {cl.label}
+                        </Badge>
+                      </td>
                       <td className="px-4 py-3 whitespace-nowrap">{formatDate(t.endDate)}</td>
                       <td className="px-4 py-3">
                         <Badge tone="destructive">
@@ -614,7 +636,8 @@ export function AnalyticsClient({
                         </Badge>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -665,13 +688,18 @@ function MemberDetail({ member, onBack }: { member: UserMetric; onBack: () => vo
         </div>
 
         {/* Task stats */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <StatCard label="Tasks Completed" value={member.tasksCompleted} />
           <StatCard label="On Time" value={member.tasksCompletedOnTime} />
           <StatCard
             label="Overdue"
             value={member.overdueTasks}
             tone={member.overdueTasks > 0 ? "destructive" : "default"}
+          />
+          <StatCard
+            label="Impact Points"
+            value={`${member.criticalityCompleted}/${member.criticalityAssigned}`}
+            hint={`${pct(member.breakdown.impact)} of assigned criticality delivered`}
           />
         </div>
 

@@ -68,6 +68,7 @@ export default async function DashboardPage() {
       projectId: t.projectId,
       projectName: t.project.name,
       status: t.status,
+      criticality: t.criticality,
       endDate: t.endDate ? t.endDate.toISOString() : null,
       completedAt: t.completedAt ? t.completedAt.toISOString() : null,
       submittedAt: t.submittedAt ? t.submittedAt.toISOString() : null,

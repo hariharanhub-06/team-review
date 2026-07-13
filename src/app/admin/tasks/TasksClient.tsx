@@ -11,6 +11,7 @@ import {
 } from "@/components/ui";
 import { cn, formatDate, formatDateTime, formatDurationPrecise } from "@/lib/utils";
 import { taskOverdue } from "@/lib/tasks";
+import { criticalityLabel } from "@/lib/scoring";
 
 /* ---------------- Types (serialized shapes) ---------------- */
 type TaskStatus = "TODO" | "IN_PROGRESS" | "IN_REVIEW" | "DONE" | "REJECTED";
@@ -42,6 +43,7 @@ interface Task {
   assigneeId: string | null;
   assignee: Member | null;
   status: TaskStatus;
+  criticality: number;
   startDate: string | null;
   endDate: string | null;
   completedAt: string | null;
@@ -432,6 +434,12 @@ export default function TasksClient({ members }: Props) {
                     <th className="p-3 font-medium">Title</th>
                     <th className="p-3 font-medium">Project</th>
                     <th className="p-3 font-medium">Assignee</th>
+                    <th
+                      className="p-3 font-medium"
+                      title="How critical the task is, 1–10. Drives the assignee's impact score."
+                    >
+                      Critical
+                    </th>
                     <th className="p-3 font-medium">Deadline</th>
                     <th className="p-3 font-medium">Status</th>
                     <th className="p-3 text-right font-medium">Hours</th>
@@ -471,6 +479,16 @@ export default function TasksClient({ members }: Props) {
                         </td>
                         <td className="p-3 text-muted-foreground">
                           {t.assignee?.name ?? "—"}
+                        </td>
+                        <td className="p-3">
+                          <Badge
+                            tone={criticalityLabel(t.criticality).tone}
+                            title={`${criticalityLabel(t.criticality).label} — ${
+                              t.criticality
+                            }/10 impact points`}
+                          >
+                            {t.criticality}
+                          </Badge>
                         </td>
                         <td className="whitespace-nowrap p-3">
                           <span className="text-muted-foreground">

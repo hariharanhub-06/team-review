@@ -110,6 +110,9 @@ model Task {
   title       String
   startDate   DateTime?   @db.Date
   endDate     DateTime?   @db.Date
+  /// How critical the task is, 1 (trivial) to 10 (mission-critical).
+  /// Weights the task's contribution to the assignee's impact score.
+  criticality Int         @default(5)
   status       TaskStatus @default(TODO)
   completedAt  DateTime?
   submittedAt  DateTime?

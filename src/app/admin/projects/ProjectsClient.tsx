@@ -15,6 +15,18 @@ import {
 } from "@/components/ui";
 import { formatDate, formatDuration, cn } from "@/lib/utils";
 import { taskOverdue } from "@/lib/tasks";
+import {
+  criticalityLabel,
+  CRITICALITY_DEFAULT,
+  CRITICALITY_MAX,
+  CRITICALITY_MIN,
+} from "@/lib/scoring";
+
+/** 1..10, for the criticality dropdowns. */
+const CRITICALITY_OPTIONS = Array.from(
+  { length: CRITICALITY_MAX - CRITICALITY_MIN + 1 },
+  (_, i) => CRITICALITY_MIN + i
+);
 
 /* ---------------- Types (serialized shapes) ---------------- */
 type TaskStatus = "TODO" | "IN_PROGRESS" | "IN_REVIEW" | "DONE" | "REJECTED";
@@ -31,6 +43,7 @@ interface Task {
   startDate: string | null;
   endDate: string | null;
   status: TaskStatus;
+  criticality: number;
   completedAt: string | null;
   submittedAt: string | null;
   reviewNote: string | null;
@@ -507,10 +520,18 @@ interface TaskFormState {
   endDate: string;
   status: TaskStatus;
   assigneeId: string;
+  criticality: number;
 }
 
 function emptyTaskForm(): TaskFormState {
-  return { title: "", startDate: "", endDate: "", status: "TODO", assigneeId: "" };
+  return {
+    title: "",
+    startDate: "",
+    endDate: "",
+    status: "TODO",
+    assigneeId: "",
+    criticality: CRITICALITY_DEFAULT,
+  };
 }
 
 function ManageTasks({
@@ -526,6 +547,15 @@ function ManageTasks({
   const [adding, setAdding] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
+
+  // Inline edit of an existing task's title / dates / criticality.
+  const [editId, setEditId] = React.useState<string | null>(null);
+  const [editForm, setEditForm] = React.useState({
+    title: "",
+    startDate: "",
+    endDate: "",
+    criticality: CRITICALITY_DEFAULT,
+  });
 
   const tasks = project.tasks;
 
@@ -543,6 +573,7 @@ function ManageTasks({
         endDate: form.endDate || null,
         status: form.status,
         assigneeId: form.assigneeId || null,
+        criticality: form.criticality,
       }),
     });
     setAdding(false);
@@ -612,6 +643,49 @@ function ManageTasks({
     await onChanged();
   }
 
+  function startEdit(task: Task) {
+    setErr(null);
+    setEditId(task.id);
+    setEditForm({
+      title: task.title,
+      startDate: toInputDate(task.startDate),
+      endDate: toInputDate(task.endDate),
+      criticality: task.criticality,
+    });
+  }
+
+  function cancelEdit() {
+    setEditId(null);
+  }
+
+  async function saveEdit(task: Task) {
+    const title = editForm.title.trim();
+    if (!title) {
+      setErr("Title is required");
+      return;
+    }
+    setBusyId(task.id);
+    setErr(null);
+    const res = await fetch(`/api/tasks/${task.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title,
+        startDate: editForm.startDate || null,
+        endDate: editForm.endDate || null,
+        criticality: editForm.criticality,
+      }),
+    });
+    setBusyId(null);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setErr(data.error ?? "Failed to update task");
+      return;
+    }
+    setEditId(null);
+    await onChanged();
+  }
+
   async function removeTask(task: Task) {
     if (!window.confirm(`Delete task "${task.title}"?`)) return;
     setBusyId(task.id);
@@ -640,6 +714,12 @@ function ManageTasks({
               <tr className="border-b border-border text-left text-xs uppercase text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">Title</th>
                 <th className="py-2 pr-3 font-medium">Dates</th>
+                <th
+                  className="py-2 pr-3 font-medium"
+                  title="How critical the task is, 1–10. Drives the assignee's impact score."
+                >
+                  Critical
+                </th>
                 <th className="py-2 pr-3 text-right font-medium">Hours</th>
                 <th className="py-2 pr-3 font-medium">Status</th>
                 <th className="py-2 pr-3 font-medium">Assignee</th>
@@ -650,31 +730,113 @@ function ManageTasks({
             <tbody>
               {tasks.map((t) => {
                 const overdue = isOverdue(t, project);
+                const editing = editId === t.id;
                 return (
                   <tr
                     key={t.id}
                     className={cn(
                       "border-b border-border align-top",
-                      overdue && "border-l-2 border-l-destructive"
+                      overdue && !editing && "border-l-2 border-l-destructive",
+                      editing && "bg-muted/30"
                     )}
                   >
                     <td className="py-2 pr-3">
-                      <span
-                        className={cn(
-                          "font-medium",
-                          overdue && "text-destructive"
-                        )}
-                      >
-                        {t.title}
-                      </span>
-                      {overdue && (
-                        <span className="ml-2 text-xs text-destructive">
-                          overdue
-                        </span>
+                      {editing ? (
+                        <Input
+                          className="h-8 w-[180px] py-1 text-xs"
+                          value={editForm.title}
+                          disabled={busyId === t.id}
+                          aria-label="Task title"
+                          autoFocus
+                          onChange={(e) =>
+                            setEditForm({ ...editForm, title: e.target.value })
+                          }
+                        />
+                      ) : (
+                        <>
+                          <span
+                            className={cn(
+                              "font-medium",
+                              overdue && "text-destructive"
+                            )}
+                          >
+                            {t.title}
+                          </span>
+                          {overdue && (
+                            <span className="ml-2 text-xs text-destructive">
+                              overdue
+                            </span>
+                          )}
+                        </>
                       )}
                     </td>
                     <td className="whitespace-nowrap py-2 pr-3 text-xs text-muted-foreground">
-                      {formatDate(t.startDate)} → {formatDate(t.endDate)}
+                      {editing ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="date"
+                            className="h-8 w-[130px] py-1 text-xs"
+                            value={editForm.startDate}
+                            disabled={busyId === t.id}
+                            aria-label="Start date"
+                            onChange={(e) =>
+                              setEditForm({
+                                ...editForm,
+                                startDate: e.target.value,
+                              })
+                            }
+                          />
+                          <span>→</span>
+                          <Input
+                            type="date"
+                            className="h-8 w-[130px] py-1 text-xs"
+                            value={editForm.endDate}
+                            disabled={busyId === t.id}
+                            aria-label="End date"
+                            onChange={(e) =>
+                              setEditForm({
+                                ...editForm,
+                                endDate: e.target.value,
+                              })
+                            }
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          {formatDate(t.startDate)} → {formatDate(t.endDate)}
+                        </>
+                      )}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {editing ? (
+                        <Select
+                          className="h-8 w-[130px] py-1 text-xs"
+                          value={String(editForm.criticality)}
+                          disabled={busyId === t.id}
+                          aria-label="Criticality"
+                          onChange={(e) =>
+                            setEditForm({
+                              ...editForm,
+                              criticality: Number(e.target.value),
+                            })
+                          }
+                        >
+                          {CRITICALITY_OPTIONS.map((c) => (
+                            <option key={c} value={c}>
+                              {c} · {criticalityLabel(c).label}
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <Badge
+                          tone={criticalityLabel(t.criticality).tone}
+                          title={`${criticalityLabel(t.criticality).label} — ${
+                            t.criticality
+                          }/10 impact points`}
+                        >
+                          {t.criticality}
+                        </Badge>
+                      )}
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums">
                       {formatDuration(t.hoursWorked)}
@@ -739,16 +901,50 @@ function ManageTasks({
                       )}
                     </td>
                     <td className="py-2 text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Delete task"
-                        aria-label="Delete task"
-                        disabled={busyId === t.id}
-                        onClick={() => removeTask(t)}
-                      >
-                        🗑
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        {editing ? (
+                          <>
+                            <Button
+                              size="sm"
+                              disabled={busyId === t.id}
+                              onClick={() => saveEdit(t)}
+                            >
+                              {busyId === t.id ? "Saving…" : "Save"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busyId === t.id}
+                              onClick={cancelEdit}
+                            >
+                              Cancel
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Edit task"
+                              aria-label="Edit task"
+                              disabled={busyId === t.id}
+                              onClick={() => startEdit(t)}
+                            >
+                              ✏️
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Delete task"
+                              aria-label="Delete task"
+                              disabled={busyId === t.id}
+                              onClick={() => removeTask(t)}
+                            >
+                              🗑
+                            </Button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -761,7 +957,7 @@ function ManageTasks({
       {/* Add task form */}
       <form
         onSubmit={addTask}
-        className="grid grid-cols-1 gap-3 rounded-md border border-border bg-muted/30 p-3 sm:grid-cols-2 lg:grid-cols-6"
+        className="grid grid-cols-1 gap-3 rounded-md border border-border bg-muted/30 p-3 sm:grid-cols-2 lg:grid-cols-7"
       >
         <div className="lg:col-span-2">
           <Label htmlFor="t-title">Title</Label>
@@ -821,7 +1017,25 @@ function ManageTasks({
             ))}
           </Select>
         </div>
-        <div className="flex items-end lg:col-span-6">
+        <div>
+          <Label htmlFor="t-crit" title="1 = trivial, 10 = mission-critical">
+            Criticality
+          </Label>
+          <Select
+            id="t-crit"
+            value={String(form.criticality)}
+            onChange={(e) =>
+              setForm({ ...form, criticality: Number(e.target.value) })
+            }
+          >
+            {CRITICALITY_OPTIONS.map((c) => (
+              <option key={c} value={c}>
+                {c} · {criticalityLabel(c).label}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex items-end lg:col-span-7">
           <Button type="submit" size="sm" disabled={adding}>
             {adding ? "Adding…" : "➕ Add Task"}
           </Button>

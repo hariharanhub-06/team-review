@@ -70,6 +70,7 @@ export async function GET(request: Request) {
       assigneeId: t.assigneeId,
       assignee: t.assignee,
       status: t.status,
+      criticality: t.criticality,
       startDate: t.startDate,
       endDate: t.endDate,
       completedAt: t.completedAt,
@@ -108,7 +109,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { projectId, title, startDate, endDate, status, assigneeId } =
+  const { projectId, title, startDate, endDate, status, assigneeId, criticality } =
     parsed.data;
 
   const task = await prisma.task.create({
@@ -116,6 +117,7 @@ export async function POST(request: Request) {
       projectId,
       title,
       status,
+      criticality,
       startDate: startDate ? toDateOnly(startDate) : null,
       endDate: endDate ? toDateOnly(endDate) : null,
       assigneeId: assigneeId ? assigneeId : null,

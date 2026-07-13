@@ -25,6 +25,7 @@ import {
   hoursBetween,
   round,
 } from "@/lib/utils";
+import { criticalityLabel } from "@/lib/scoring";
 
 /* ---------------- Types ---------------- */
 type DayStatus = "COMPLETED" | "IN_PROGRESS" | "BLOCKED";
@@ -40,6 +41,7 @@ interface SerializedTask {
   projectId: string;
   projectName: string;
   status: string;
+  criticality: number;
   endDate: string | null;
   completedAt: string | null;
   submittedAt: string | null;
@@ -553,6 +555,15 @@ export function DashboardClient({
                       >
                         <td className="px-2 py-2 font-medium text-foreground">
                           {t.title}
+                          <Badge
+                            tone={criticalityLabel(t.criticality).tone}
+                            className="ml-2 align-middle"
+                            title={`Criticality ${t.criticality}/10 — ${
+                              criticalityLabel(t.criticality).label
+                            }. Higher-criticality tasks count for more in your score.`}
+                          >
+                            {t.criticality}
+                          </Badge>
                           {t.status === "REJECTED" && t.reviewNote && (
                             <p className="mt-0.5 text-xs font-normal text-destructive">
                               ✗ {t.reviewNote}

@@ -71,6 +71,12 @@ export const taskSchema = z.object({
   status: z.enum(TASK_STATUSES).default("TODO"),
   assigneeId: z.string().optional().nullable(),
   reviewNote: z.string().optional().nullable(),
+  criticality: z.coerce
+    .number()
+    .int()
+    .min(1, "Criticality must be between 1 and 10")
+    .max(10, "Criticality must be between 1 and 10")
+    .default(5),
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;

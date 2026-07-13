@@ -51,6 +51,7 @@ export async function PATCH(
   if (data.assigneeId !== undefined)
     update.assigneeId = data.assigneeId ? data.assigneeId : null;
   if (data.reviewNote !== undefined) update.reviewNote = data.reviewNote || null;
+  if (data.criticality !== undefined) update.criticality = data.criticality;
 
   if (data.status !== undefined) {
     update.status = data.status;

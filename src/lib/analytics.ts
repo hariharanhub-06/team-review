@@ -27,6 +27,9 @@ export interface UserMetric {
   tasksCompleted: number;
   tasksCompletedOnTime: number;
   overdueTasks: number;
+  /** Criticality points delivered / assigned — the raw numbers behind `breakdown.impact`. */
+  criticalityCompleted: number;
+  criticalityAssigned: number;
   breakdown: ScoreBreakdown;
   rank: number;
 }
@@ -50,6 +53,7 @@ export interface AnalyticsResult {
     project: string;
     assignee: string | null;
     endDate: Date | null;
+    criticality: number;
     daysOverdue: number;
   }[];
   totals: {
@@ -150,18 +154,29 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
   let onTime = 0;
   let overdue = 0;
   const overdueTasks: AnalyticsResult["overdueTasks"] = [];
-  const perUserTaskStats = new Map<string, { completed: number; onTime: number; overdue: number }>();
+  type TaskStat = {
+    completed: number;
+    onTime: number;
+    overdue: number;
+    critCompleted: number;
+    critAssigned: number;
+  };
+  const perUserTaskStats = new Map<string, TaskStat>();
 
-  function ensureTaskStat(id: string) {
+  function ensureTaskStat(id: string): TaskStat {
     let s = perUserTaskStats.get(id);
     if (!s) {
-      s = { completed: 0, onTime: 0, overdue: 0 };
+      s = { completed: 0, onTime: 0, overdue: 0, critCompleted: 0, critAssigned: 0 };
       perUserTaskStats.set(id, s);
     }
     return s;
   }
 
   for (const t of tasks) {
+    // Every assigned task adds its criticality to the member's "points on the
+    // table"; only finishing it converts those points into delivered impact.
+    if (t.assigneeId) ensureTaskStat(t.assigneeId).critAssigned += t.criticality;
+
     if (t.status === "DONE") {
       completed++;
       const ok = !t.endDate || (t.completedAt && t.completedAt <= endOfDay(t.endDate));
@@ -169,6 +184,7 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
       if (t.assigneeId) {
         const s = ensureTaskStat(t.assigneeId);
         s.completed++;
+        s.critCompleted += t.criticality;
         if (ok) s.onTime++;
       }
     } else {
@@ -182,6 +198,7 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
           project: t.project.name,
           assignee: t.assignee?.name ?? null,
           endDate: t.endDate,
+          criticality: t.criticality,
           daysOverdue: od.daysOverdue,
         });
       }
@@ -192,7 +209,9 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
 
   const perUser: UserMetric[] = users.map((u) => {
     const agg = perUserMap.get(u.id);
-    const ts = perUserTaskStats.get(u.id) ?? { completed: 0, onTime: 0, overdue: 0 };
+    const ts =
+      perUserTaskStats.get(u.id) ??
+      { completed: 0, onTime: 0, overdue: 0, critCompleted: 0, critAssigned: 0 };
     const expectedHours = u.expectedDailyHours * workingDays;
     const totalHours = agg?.totalHours ?? 0;
     const breakdown = computeScore({
@@ -202,6 +221,8 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
       tasksCompletedOnTime: ts.onTime,
       daysLogged: agg?.daysLogged ?? 0,
       workingDays,
+      criticalityCompleted: ts.critCompleted,
+      criticalityAssigned: ts.critAssigned,
     });
     const projects = agg
       ? [...agg.projects.entries()]
@@ -229,6 +250,8 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
       tasksCompleted: ts.completed,
       tasksCompletedOnTime: ts.onTime,
       overdueTasks: ts.overdue,
+      criticalityCompleted: ts.critCompleted,
+      criticalityAssigned: ts.critAssigned,
       breakdown,
       rank: 0,
     };
