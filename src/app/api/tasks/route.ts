@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
-import { round, toDateOnly } from "@/lib/utils";
+import { toDateOnly } from "@/lib/utils";
+import { taskHoursWorked } from "@/lib/tasks";
 import { taskSchema } from "@/lib/validation";
 
 export async function GET(request: Request) {
@@ -43,17 +44,7 @@ export async function GET(request: Request) {
   ]);
 
   const tasks = rows.map((t) => {
-    const hoursWorked = round(
-      entries.reduce((sum, e) => {
-        const linked = e.taskId === t.id;
-        // Legacy entries predate WorkEntry.taskId: match on project + title.
-        const legacy =
-          !e.taskId &&
-          e.projectId === t.projectId &&
-          e.taskDescription === t.title;
-        return linked || legacy ? sum + e.hoursWorked : sum;
-      }, 0)
-    );
+    const hoursWorked = taskHoursWorked(t, entries);
 
     let submitCount = 0;
     let rejectCount = 0;

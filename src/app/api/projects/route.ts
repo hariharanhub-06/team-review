@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
-import { toDateOnly, round } from "@/lib/utils";
+import { toDateOnly } from "@/lib/utils";
+import { taskHoursWorked } from "@/lib/tasks";
 import { projectSchema } from "@/lib/validation";
 
 export async function GET() {
@@ -27,21 +28,9 @@ export async function GET() {
     }),
   ]);
 
-  // Total hours logged per task (linked via taskId, or legacy title match).
   const withHours = projects.map((p) => ({
     ...p,
-    tasks: p.tasks.map((t) => ({
-      ...t,
-      hoursWorked: round(
-        entries
-          .filter(
-            (e) =>
-              e.taskId === t.id ||
-              (!e.taskId && e.projectId === t.projectId && e.taskDescription === t.title)
-          )
-          .reduce((sum, e) => sum + e.hoursWorked, 0)
-      ),
-    })),
+    tasks: p.tasks.map((t) => ({ ...t, hoursWorked: taskHoursWorked(t, entries) })),
   }));
 
   return Response.json({ projects: withHours });

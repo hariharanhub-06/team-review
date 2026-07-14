@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { todayUtc, round } from "@/lib/utils";
-import { taskOverdue } from "@/lib/tasks";
+import { todayUtc } from "@/lib/utils";
+import { taskOverdue, taskHoursWorked } from "@/lib/tasks";
 import { DashboardClient } from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
@@ -46,15 +46,7 @@ export default async function DashboardPage() {
   ]);
 
   const hoursForTask = (t: { id: string; projectId: string; title: string }) =>
-    round(
-      myEntries
-        .filter(
-          (e) =>
-            e.taskId === t.id ||
-            (!e.taskId && e.projectId === t.projectId && e.taskDescription === t.title)
-        )
-        .reduce((sum, e) => sum + e.hoursWorked, 0)
-    );
+    taskHoursWorked(t, myEntries);
 
   const tasks = assigned.map((t) => {
     const od = taskOverdue(t.endDate, t.status, {

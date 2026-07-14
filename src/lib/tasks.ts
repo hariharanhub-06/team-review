@@ -7,10 +7,44 @@
  *   - Otherwise, overdue days = calendar days past the deadline MINUS total hold days.
  */
 
+import { round } from "./utils";
+
 export interface HoldInfo {
   onHold: boolean;
   heldDays: number;
   holdSince: string | Date | null;
+}
+
+/** The columns of a WorkEntry needed to attribute its hours to a task. */
+export interface HoursEntry {
+  taskId: string | null;
+  projectId: string;
+  taskDescription: string;
+  hoursWorked: number;
+}
+
+/**
+ * Hours logged against one task.
+ *
+ * Entries are normally linked by `taskId`. Entries created before WorkEntry.taskId
+ * existed have none, so they fall back to matching on project + exact title.
+ *
+ * Every surface that shows task hours must go through this — the rule used to be
+ * copy-pasted, and the copy the projects page rendered from was missing entirely,
+ * so tasks showed "0m" until an unrelated edit refetched them.
+ */
+export function taskHoursWorked(
+  task: { id: string; projectId: string; title: string },
+  entries: HoursEntry[]
+): number {
+  return round(
+    entries.reduce((sum, e) => {
+      const linked = e.taskId === task.id;
+      const legacy =
+        !e.taskId && e.projectId === task.projectId && e.taskDescription === task.title;
+      return linked || legacy ? sum + e.hoursWorked : sum;
+    }, 0)
+  );
 }
 
 const DAY = 86_400_000;
