@@ -65,6 +65,7 @@ export async function GET(request: Request) {
       return {
         id: log.id,
         date: log.date,
+        userId: log.userId,
         userName: log.user.name,
         userEmail: log.user.email,
         loginAt: log.loginAt,

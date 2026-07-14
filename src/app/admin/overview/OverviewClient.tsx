@@ -35,26 +35,43 @@ interface Entry {
   hours: number;
 }
 
+interface TaskOption {
+  id: string;
+  title: string;
+  projectId: string;
+  assigneeId: string | null;
+}
+
+/** Sentinel for "this wasn't an assigned task, let me type it". */
+const CUSTOM_TASK = "__custom__";
+
 /** One editable row in the admin's work-split editor. */
 interface DraftEntry {
   projectId: string;
-  taskId: string | null;
+  taskId: string;
   taskDescription: string;
   hours: string;
+  /** true = free-text description instead of an assigned task. */
+  custom: boolean;
 }
 
-function draftFrom(entries: Entry[]): DraftEntry[] {
+function draftFrom(entries: Entry[], tasks: TaskOption[]): DraftEntry[] {
   if (entries.length === 0) return [blankDraft()];
-  return entries.map((e) => ({
-    projectId: e.projectId,
-    taskId: e.taskId,
-    taskDescription: e.taskDescription,
-    hours: String(e.hours),
-  }));
+  return entries.map((e) => {
+    const matched = e.taskId ? tasks.find((t) => t.id === e.taskId) : undefined;
+    return {
+      projectId: e.projectId,
+      taskId: matched?.id ?? "",
+      taskDescription: e.taskDescription,
+      hours: String(e.hours),
+      // An entry with a description but no surviving task link was typed by hand.
+      custom: !matched && e.taskDescription.length > 0,
+    };
+  });
 }
 
 function blankDraft(): DraftEntry {
-  return { projectId: "", taskId: null, taskDescription: "", hours: "" };
+  return { projectId: "", taskId: "", taskDescription: "", hours: "", custom: false };
 }
 
 interface BreakItem {
@@ -66,6 +83,7 @@ interface BreakItem {
 interface Row {
   id: string;
   date: string;
+  userId: string;
   userName: string;
   userEmail: string;
   loginAt: string | null;
@@ -319,15 +337,17 @@ function RowDetail({ row }: { row: Row }) {
 function EditEntriesModal({
   row,
   projects,
+  tasks,
   onClose,
   onSaved,
 }: {
   row: Row;
   projects: Option[];
+  tasks: TaskOption[];
   onClose: () => void;
   onSaved: (entries: Entry[], totalWorkHours: number) => void;
 }) {
-  const [draft, setDraft] = useState<DraftEntry[]>(() => draftFrom(row.entries));
+  const [draft, setDraft] = useState<DraftEntry[]>(() => draftFrom(row.entries, tasks));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -343,6 +363,13 @@ function EditEntriesModal({
     setDraft((prev) => prev.map((d, j) => (j === i ? { ...d, ...patch } : d)));
   }
 
+  /** Tasks assigned to THIS member on THIS project — same list they'd see themselves. */
+  const tasksFor = useCallback(
+    (projectId: string) =>
+      tasks.filter((t) => t.projectId === projectId && t.assigneeId === row.userId),
+    [tasks, row.userId]
+  );
+
   const total = draft.reduce((s, d) => s + (parseFloat(d.hours) || 0), 0);
 
   async function save() {
@@ -353,7 +380,7 @@ function EditEntriesModal({
         .filter((d) => d.projectId && parseFloat(d.hours) > 0)
         .map((d) => ({
           projectId: d.projectId,
-          taskId: d.taskId,
+          taskId: d.taskId || null,
           taskDescription: d.taskDescription.trim() || "—",
           hoursWorked: parseFloat(d.hours),
         }));
@@ -409,64 +436,123 @@ function EditEntriesModal({
             . Split that time across the projects they worked on.
           </p>
 
-          {draft.map((d, i) => (
-            <div
-              key={i}
-              className="grid grid-cols-1 gap-2 rounded-md border border-border p-3 sm:grid-cols-[1fr_1fr_90px_auto]"
-            >
-              <div>
-                <Label htmlFor={`p-${i}`}>Project</Label>
-                <Select
-                  id={`p-${i}`}
-                  value={d.projectId}
-                  onChange={(e) => update(i, { projectId: e.target.value, taskId: null })}
-                >
-                  <option value="">Select…</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </Select>
+          {draft.map((d, i) => {
+            const assigned = tasksFor(d.projectId);
+            const freeText = d.custom || assigned.length === 0;
+            return (
+              <div
+                key={i}
+                className="grid grid-cols-1 gap-2 rounded-md border border-border p-3 sm:grid-cols-[1fr_1.5fr_90px_auto]"
+              >
+                <div>
+                  <Label htmlFor={`p-${i}`}>Project</Label>
+                  <Select
+                    id={`p-${i}`}
+                    value={d.projectId}
+                    onChange={(e) =>
+                      update(i, {
+                        projectId: e.target.value,
+                        taskId: "",
+                        taskDescription: "",
+                        custom: false,
+                      })
+                    }
+                  >
+                    <option value="">Select…</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor={`t-${i}`}>Task</Label>
+                  {!d.projectId ? (
+                    <Select id={`t-${i}`} disabled value="">
+                      <option value="">Select a project first…</option>
+                    </Select>
+                  ) : freeText ? (
+                    <div className="space-y-1">
+                      <Input
+                        id={`t-${i}`}
+                        value={d.taskDescription}
+                        placeholder={
+                          assigned.length === 0
+                            ? "No task assigned to them here — describe the work"
+                            : "Describe the task"
+                        }
+                        onChange={(e) => update(i, { taskDescription: e.target.value })}
+                      />
+                      {assigned.length > 0 && (
+                        <button
+                          type="button"
+                          className="text-xs text-primary hover:underline"
+                          onClick={() =>
+                            update(i, { custom: false, taskId: "", taskDescription: "" })
+                          }
+                        >
+                          ← Choose an assigned task
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <Select
+                      id={`t-${i}`}
+                      value={d.taskId || ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === CUSTOM_TASK) {
+                          update(i, { custom: true, taskId: "", taskDescription: "" });
+                          return;
+                        }
+                        const t = assigned.find((x) => x.id === v);
+                        update(i, { taskId: v, taskDescription: t?.title ?? "" });
+                      }}
+                    >
+                      <option value="">Select task…</option>
+                      {assigned.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.title}
+                        </option>
+                      ))}
+                      <option value={CUSTOM_TASK}>✎ Something else…</option>
+                    </Select>
+                  )}
+                </div>
+
+                <div>
+                  <Label htmlFor={`h-${i}`}>Hours</Label>
+                  <Input
+                    id={`h-${i}`}
+                    type="number"
+                    min="0"
+                    max="24"
+                    step="0.25"
+                    value={d.hours}
+                    onChange={(e) => update(i, { hours: e.target.value })}
+                  />
+                </div>
+
+                <div className="flex items-end">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Remove row"
+                    title="Remove row"
+                    onClick={() =>
+                      setDraft((prev) =>
+                        prev.length === 1 ? [blankDraft()] : prev.filter((_, j) => j !== i)
+                      )
+                    }
+                  >
+                    🗑
+                  </Button>
+                </div>
               </div>
-              <div>
-                <Label htmlFor={`d-${i}`}>What they did</Label>
-                <Input
-                  id={`d-${i}`}
-                  value={d.taskDescription}
-                  placeholder="e.g. 3D Model"
-                  onChange={(e) => update(i, { taskDescription: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor={`h-${i}`}>Hours</Label>
-                <Input
-                  id={`h-${i}`}
-                  type="number"
-                  min="0"
-                  max="24"
-                  step="0.25"
-                  value={d.hours}
-                  onChange={(e) => update(i, { hours: e.target.value })}
-                />
-              </div>
-              <div className="flex items-end">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Remove row"
-                  title="Remove row"
-                  onClick={() =>
-                    setDraft((prev) =>
-                      prev.length === 1 ? [blankDraft()] : prev.filter((_, j) => j !== i)
-                    )
-                  }
-                >
-                  🗑
-                </Button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Button
@@ -503,9 +589,11 @@ function EditEntriesModal({
 export default function OverviewClient({
   members,
   projects,
+  tasks,
 }: {
   members: Option[];
   projects: Option[];
+  tasks: TaskOption[];
 }) {
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [rows, setRows] = useState<Row[]>([]);
@@ -908,6 +996,7 @@ export default function OverviewClient({
         <EditEntriesModal
           row={editing}
           projects={projects}
+          tasks={tasks}
           onClose={() => setEditing(null)}
           onSaved={(entries, totalWorkHours) =>
             applyEntries(editing.id, entries, totalWorkHours)
