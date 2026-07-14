@@ -31,6 +31,34 @@ export function ServiceWorkerRegistrar() {
 }
 
 /**
+ * Reload button. An installed PWA has no browser chrome, so there is no way to
+ * refresh a stale screen — this is it. A full reload (rather than
+ * router.refresh()) also re-runs client-side fetches and picks up a new build,
+ * and is safe: the service worker never caches pages or /api responses.
+ */
+export function RefreshButton() {
+  const [spinning, setSpinning] = useState(false);
+
+  function refresh() {
+    setSpinning(true);
+    window.location.reload();
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={refresh}
+      disabled={spinning}
+      title="Refresh"
+      aria-label="Refresh"
+    >
+      <span className={spinning ? "inline-block animate-spin" : undefined}>🔄</span>
+    </Button>
+  );
+}
+
+/**
  * "Install app" button. Only appears when the browser says the app is
  * installable and it is not already running as one, so it stays out of the way
  * for anyone who has installed it (or is on a browser that cannot).
