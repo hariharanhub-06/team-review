@@ -829,107 +829,89 @@ export function DashboardClient({
             )}
             {history && !historyLoading && history.length > 0 && (
               <>
-                <p className="mb-4 text-sm text-muted-foreground">
+                <p className="mb-3 text-sm text-muted-foreground">
                   Your last {history.length} {history.length === 1 ? "day" : "days"} — view
                   only.
                 </p>
-                <div className="space-y-4">
-                  {history.map((h) => (
-                    <div
-                      key={h.id}
-                      className="rounded-lg border border-border bg-muted/20 p-4"
-                    >
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                        <span className="font-semibold">{formatDate(h.date)}</span>
-                        <StatusBadge status={h.status} />
-                        <span className="text-sm text-muted-foreground">
-                          {formatTime(h.loginAt)} → {formatTime(h.logoutAt)}
-                        </span>
-                        <span className="ml-auto flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                          <span className="text-muted-foreground">
-                            Logged{" "}
-                            <span className="font-semibold text-foreground">
-                              {formatDuration(h.workHours)}
-                            </span>
-                          </span>
-                          <span className="text-muted-foreground">
-                            Break{" "}
-                            <span className="font-semibold text-foreground">
-                              {formatDuration(h.breakHours)}
-                            </span>
-                          </span>
-                          <span className="text-muted-foreground">
-                            Net{" "}
-                            <span className="font-semibold text-foreground">
-                              {formatDuration(h.netHours)}
-                            </span>
-                          </span>
-                        </span>
-                      </div>
-
-                      {h.entries.length > 0 ? (
-                        <div className="mt-3 overflow-x-auto scroll-thin">
-                          <table className="w-full min-w-[420px] text-sm">
-                            <thead>
-                              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                                <th className="px-2 py-1.5 font-medium">Project</th>
-                                <th className="px-2 py-1.5 font-medium">Task</th>
-                                <th className="px-2 py-1.5 text-right font-medium">Hours</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {h.entries.map((e) => (
-                                <tr key={e.id} className="border-b border-border last:border-0">
-                                  <td className="px-2 py-1.5">{e.project}</td>
-                                  <td className="px-2 py-1.5 text-muted-foreground">
-                                    {e.task || "—"}
-                                  </td>
-                                  <td className="px-2 py-1.5 text-right tabular-nums">
-                                    {formatDuration(e.hours)}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : (
-                        <p className="mt-3 text-sm text-muted-foreground">
-                          No work entries were logged on this day.
-                        </p>
-                      )}
-
-                      {(h.plannedWork || h.workCompleted || h.remarks) && (
-                        <dl className="mt-3 space-y-2 text-sm">
-                          {h.plannedWork && (
-                            <div>
-                              <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                Planned
-                              </dt>
-                              <dd className="whitespace-pre-wrap">{h.plannedWork}</dd>
-                            </div>
-                          )}
-                          {h.workCompleted && (
-                            <div>
-                              <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                Completed
-                              </dt>
-                              <dd className="whitespace-pre-wrap">{h.workCompleted}</dd>
-                            </div>
-                          )}
-                          {h.remarks && (
-                            <div>
-                              <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                Remarks
-                              </dt>
-                              <dd className="whitespace-pre-wrap italic text-muted-foreground">
+                <div className="overflow-x-auto scroll-thin">
+                  <table className="w-full min-w-[900px] text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="px-2 py-2 font-medium">Date</th>
+                        <th className="px-2 py-2 font-medium">Login</th>
+                        <th className="px-2 py-2 font-medium">Logout</th>
+                        <th className="px-2 py-2 text-right font-medium">Break</th>
+                        <th className="px-2 py-2 text-right font-medium">Net</th>
+                        <th className="px-2 py-2 text-right font-medium">Logged</th>
+                        <th className="px-2 py-2 font-medium">Status</th>
+                        <th className="px-2 py-2 font-medium">Projects &amp; Tasks</th>
+                        <th className="px-2 py-2 font-medium">Work / Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.map((h) => (
+                        <tr
+                          key={h.id}
+                          className="border-b border-border align-top last:border-0"
+                        >
+                          <td className="whitespace-nowrap px-2 py-2 font-medium">
+                            {formatDate(h.date)}
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">
+                            {formatTime(h.loginAt)}
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">
+                            {formatTime(h.logoutAt)}
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-muted-foreground">
+                            {formatDuration(h.breakHours)}
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums">
+                            {formatDuration(h.netHours)}
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums font-semibold">
+                            {formatDuration(h.workHours)}
+                          </td>
+                          <td className="px-2 py-2">
+                            <StatusBadge status={h.status} />
+                          </td>
+                          <td className="px-2 py-2">
+                            {h.entries.length === 0 ? (
+                              <span className="text-muted-foreground">—</span>
+                            ) : (
+                              <ul className="space-y-0.5">
+                                {h.entries.map((e) => (
+                                  <li key={e.id}>
+                                    {e.project}
+                                    {e.task && (
+                                      <span className="text-muted-foreground">
+                                        {" "}
+                                        · {e.task}
+                                      </span>
+                                    )}{" "}
+                                    <span className="tabular-nums text-muted-foreground">
+                                      ({formatDuration(e.hours)})
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </td>
+                          <td className="max-w-xs px-2 py-2 text-muted-foreground">
+                            {h.workCompleted && (
+                              <div className="whitespace-pre-wrap">{h.workCompleted}</div>
+                            )}
+                            {h.remarks && (
+                              <div className="whitespace-pre-wrap text-xs italic">
                                 {h.remarks}
-                              </dd>
-                            </div>
-                          )}
-                        </dl>
-                      )}
-                    </div>
-                  ))}
+                              </div>
+                            )}
+                            {!h.workCompleted && !h.remarks && "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </>
             )}
