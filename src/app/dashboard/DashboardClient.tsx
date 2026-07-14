@@ -991,8 +991,10 @@ export function DashboardClient({
                 </p>
               )}
               {savedEntriesCount === 0 && (
-                <p className="rounded-md bg-[hsl(var(--warning))]/10 px-3 py-2 text-sm text-[hsl(var(--warning))]">
-                  Tip: save at least one work entry before marking logout.
+                <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  Split your day across projects before logging out — add at least one
+                  work entry above and hit <strong>Save Entries</strong>. Without it your
+                  work hours for today are recorded as zero.
                 </p>
               )}
               {hoursByProjectBlock}
@@ -1020,7 +1022,12 @@ export function DashboardClient({
               <Button
                 variant="success"
                 onClick={markLogout}
-                disabled={logoutPending || workCompleted.trim().length === 0 || onBreak}
+                disabled={
+                  logoutPending ||
+                  workCompleted.trim().length === 0 ||
+                  onBreak ||
+                  savedEntriesCount === 0
+                }
               >
                 {logoutPending ? "Marking…" : "Mark Logout"}
               </Button>

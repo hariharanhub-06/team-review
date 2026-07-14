@@ -84,6 +84,8 @@ export async function GET(request: Request) {
         remarks: log.remarks,
         totalWorkHours: round(totalWorkHours),
         entries: log.workEntries.map((e) => ({
+          projectId: e.projectId,
+          taskId: e.taskId,
           project: e.project.name,
           taskDescription: e.taskDescription,
           hours: e.hoursWorked,

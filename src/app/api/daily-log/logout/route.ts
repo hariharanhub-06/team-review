@@ -53,6 +53,22 @@ export async function POST(request: Request) {
     );
   }
 
+  // Block logout until the day's work is split across projects. Without this the
+  // member's presence is recorded but their work hours are 0, which reads as a full
+  // day of zero output and silently zeroes the effort half of their score.
+  const entryCount = await prisma.workEntry.count({
+    where: { dailyLog: { userId: user.sub, date } },
+  });
+  if (entryCount === 0) {
+    return Response.json(
+      {
+        error:
+          "Add your work split before logging out — log at least one project entry with the hours you spent on it.",
+      },
+      { status: 400 }
+    );
+  }
+
   const now = new Date();
 
   const log = await prisma.dailyLog.update({

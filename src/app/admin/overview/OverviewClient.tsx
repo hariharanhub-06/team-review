@@ -28,9 +28,33 @@ interface Filters {
 }
 
 interface Entry {
+  projectId: string;
+  taskId: string | null;
   project: string;
   taskDescription: string;
   hours: number;
+}
+
+/** One editable row in the admin's work-split editor. */
+interface DraftEntry {
+  projectId: string;
+  taskId: string | null;
+  taskDescription: string;
+  hours: string;
+}
+
+function draftFrom(entries: Entry[]): DraftEntry[] {
+  if (entries.length === 0) return [blankDraft()];
+  return entries.map((e) => ({
+    projectId: e.projectId,
+    taskId: e.taskId,
+    taskDescription: e.taskDescription,
+    hours: String(e.hours),
+  }));
+}
+
+function blankDraft(): DraftEntry {
+  return { projectId: "", taskId: null, taskDescription: "", hours: "" };
 }
 
 interface BreakItem {
@@ -291,6 +315,191 @@ function RowDetail({ row }: { row: Row }) {
   );
 }
 
+/** Admin editor for a day's work split — used when a member forgot to log one. */
+function EditEntriesModal({
+  row,
+  projects,
+  onClose,
+  onSaved,
+}: {
+  row: Row;
+  projects: Option[];
+  onClose: () => void;
+  onSaved: (entries: Entry[], totalWorkHours: number) => void;
+}) {
+  const [draft, setDraft] = useState<DraftEntry[]>(() => draftFrom(row.entries));
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function update(i: number, patch: Partial<DraftEntry>) {
+    setDraft((prev) => prev.map((d, j) => (j === i ? { ...d, ...patch } : d)));
+  }
+
+  const total = draft.reduce((s, d) => s + (parseFloat(d.hours) || 0), 0);
+
+  async function save() {
+    setPending(true);
+    setError(null);
+    try {
+      const entries = draft
+        .filter((d) => d.projectId && parseFloat(d.hours) > 0)
+        .map((d) => ({
+          projectId: d.projectId,
+          taskId: d.taskId,
+          taskDescription: d.taskDescription.trim() || "—",
+          hoursWorked: parseFloat(d.hours),
+        }));
+      const res = await fetch(`/api/logs/${row.id}/entries`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ entries }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save work split");
+      onSaved(data.entries as Entry[], data.totalWorkHours as number);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save work split");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:items-center"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="w-full max-w-2xl rounded-lg border border-border bg-card shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit work split"
+      >
+        <div className="flex items-center justify-between gap-2 border-b border-border p-4">
+          <h2 className="min-w-0 break-words text-lg font-semibold">
+            Work split — {row.userName}, {formatDate(row.date)}
+          </h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ✕
+          </Button>
+        </div>
+
+        <div className="space-y-3 p-4">
+          <p className="text-sm text-muted-foreground">
+            They were active for{" "}
+            <span className="font-medium text-foreground">
+              {formatDurationPrecise(row.netActiveHours)}
+            </span>
+            . Split that time across the projects they worked on.
+          </p>
+
+          {draft.map((d, i) => (
+            <div
+              key={i}
+              className="grid grid-cols-1 gap-2 rounded-md border border-border p-3 sm:grid-cols-[1fr_1fr_90px_auto]"
+            >
+              <div>
+                <Label htmlFor={`p-${i}`}>Project</Label>
+                <Select
+                  id={`p-${i}`}
+                  value={d.projectId}
+                  onChange={(e) => update(i, { projectId: e.target.value, taskId: null })}
+                >
+                  <option value="">Select…</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor={`d-${i}`}>What they did</Label>
+                <Input
+                  id={`d-${i}`}
+                  value={d.taskDescription}
+                  placeholder="e.g. 3D Model"
+                  onChange={(e) => update(i, { taskDescription: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor={`h-${i}`}>Hours</Label>
+                <Input
+                  id={`h-${i}`}
+                  type="number"
+                  min="0"
+                  max="24"
+                  step="0.25"
+                  value={d.hours}
+                  onChange={(e) => update(i, { hours: e.target.value })}
+                />
+              </div>
+              <div className="flex items-end">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Remove row"
+                  title="Remove row"
+                  onClick={() =>
+                    setDraft((prev) =>
+                      prev.length === 1 ? [blankDraft()] : prev.filter((_, j) => j !== i)
+                    )
+                  }
+                >
+                  🗑
+                </Button>
+              </div>
+            </div>
+          ))}
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDraft((prev) => [...prev, blankDraft()])}
+            >
+              + Add project
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Total:{" "}
+              <span className="font-medium tabular-nums text-foreground">
+                {formatDurationPrecise(total)}
+              </span>
+            </span>
+          </div>
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+
+          <div className="flex gap-2 border-t border-border pt-3">
+            <Button onClick={save} disabled={pending}>
+              {pending ? "Saving…" : "Save work split"}
+            </Button>
+            <Button variant="outline" onClick={onClose} disabled={pending}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function OverviewClient({
   members,
   projects,
@@ -305,6 +514,22 @@ export default function OverviewClient({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Row | null>(null);
+
+  /** Fold an admin-edited work split back into the table without a full reload. */
+  function applyEntries(rowId: string, entries: Entry[], totalWorkHours: number) {
+    setRows((prev) =>
+      prev.map((r) => (r.id === rowId ? { ...r, entries, totalWorkHours } : r))
+    );
+    setSummary((prev) => {
+      const before = rows.find((r) => r.id === rowId)?.totalWorkHours ?? 0;
+      return {
+        ...prev,
+        totalHours: Math.max(0, prev.totalHours - before + totalWorkHours),
+      };
+    });
+    setEditing(null);
+  }
 
   /** Delete a member's whole day entry so they can re-do it. */
   async function deleteEntry(row: Row) {
@@ -622,6 +847,20 @@ export default function OverviewClient({
                           </td>
                           <td className="px-2 py-2">
                             <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title={
+                                  row.entries.length === 0
+                                    ? "No work split logged — add one"
+                                    : "Edit work split"
+                                }
+                                aria-label="Edit work split"
+                                disabled={busyId === row.id}
+                                onClick={() => setEditing(row)}
+                              >
+                                {row.entries.length === 0 ? "⚠️" : "✏️"}
+                              </Button>
                               {row.logoutAt && (
                                 <Button
                                   variant="ghost"
@@ -664,6 +903,17 @@ export default function OverviewClient({
           )}
         </CardContent>
       </Card>
+
+      {editing && (
+        <EditEntriesModal
+          row={editing}
+          projects={projects}
+          onClose={() => setEditing(null)}
+          onSaved={(entries, totalWorkHours) =>
+            applyEntries(editing.id, entries, totalWorkHours)
+          }
+        />
+      )}
     </div>
   );
 }
