@@ -92,6 +92,23 @@ const BREAK_LABELS: Record<BreakType, string> = {
   OTHER: "Other",
 };
 
+/** Read-only past work log, as returned by GET /api/my-history. */
+interface HistoryDay {
+  id: string;
+  date: string;
+  loginAt: string | null;
+  logoutAt: string | null;
+  status: DayStatus | null;
+  plannedWork: string | null;
+  workCompleted: string | null;
+  remarks: string | null;
+  loginHours: number;
+  breakHours: number;
+  netHours: number;
+  workHours: number;
+  entries: { id: string; project: string; task: string; hours: number }[];
+}
+
 interface EntryRow {
   key: string;
   projectId: string;
@@ -159,6 +176,30 @@ export function DashboardClient({
   const tabParam = searchParams.get("tab");
   const tab: "today" | "work" | "tasks" =
     tabParam === "work" ? "work" : tabParam === "tasks" ? "tasks" : "today";
+
+  // Work Logs (history) — loaded lazily the first time the tab is opened.
+  const [history, setHistory] = useState<HistoryDay[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const historyRequested = useRef(false);
+
+  useEffect(() => {
+    if (tab !== "work" || historyRequested.current) return;
+    historyRequested.current = true;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    fetch("/api/my-history")
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error ?? "Failed to load your work logs");
+        setHistory(data.history as HistoryDay[]);
+      })
+      .catch((e) => {
+        historyRequested.current = false; // allow a retry on the next visit
+        setHistoryError(e instanceof Error ? e.message : "Something went wrong");
+      })
+      .finally(() => setHistoryLoading(false));
+  }, [tab]);
 
   // My Tasks
   const [taskPending, setTaskPending] = useState<string | null>(null);
@@ -512,7 +553,7 @@ export function DashboardClient({
         {tab === "today"
           ? "🗓️ Today — attendance & breaks"
           : tab === "work"
-          ? "📝 Work Log"
+          ? "📋 Work Logs — your past days"
           : "✅ My Tasks"}
       </p>
 
@@ -766,8 +807,138 @@ export function DashboardClient({
         </Card>
       )}
 
-      {/* Project & Task Logging — shown on Today (above Mark Logout) and the Work Log tab */}
-      {(tab === "work" || tab === "today") && (
+      {/* Work Logs tab — read-only history of past days. No editing: only an admin can amend a log. */}
+      {tab === "work" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Work Log History</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {historyLoading && (
+              <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+            )}
+            {historyError && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {historyError}
+              </p>
+            )}
+            {history && !historyLoading && history.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                No work logs yet. Mark login on the Today tab to start your first one.
+              </p>
+            )}
+            {history && !historyLoading && history.length > 0 && (
+              <>
+                <p className="mb-4 text-sm text-muted-foreground">
+                  Your last {history.length} {history.length === 1 ? "day" : "days"} — view
+                  only.
+                </p>
+                <div className="space-y-4">
+                  {history.map((h) => (
+                    <div
+                      key={h.id}
+                      className="rounded-lg border border-border bg-muted/20 p-4"
+                    >
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                        <span className="font-semibold">{formatDate(h.date)}</span>
+                        <StatusBadge status={h.status} />
+                        <span className="text-sm text-muted-foreground">
+                          {formatTime(h.loginAt)} → {formatTime(h.logoutAt)}
+                        </span>
+                        <span className="ml-auto flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                          <span className="text-muted-foreground">
+                            Logged{" "}
+                            <span className="font-semibold text-foreground">
+                              {formatDuration(h.workHours)}
+                            </span>
+                          </span>
+                          <span className="text-muted-foreground">
+                            Break{" "}
+                            <span className="font-semibold text-foreground">
+                              {formatDuration(h.breakHours)}
+                            </span>
+                          </span>
+                          <span className="text-muted-foreground">
+                            Net{" "}
+                            <span className="font-semibold text-foreground">
+                              {formatDuration(h.netHours)}
+                            </span>
+                          </span>
+                        </span>
+                      </div>
+
+                      {h.entries.length > 0 ? (
+                        <div className="mt-3 overflow-x-auto scroll-thin">
+                          <table className="w-full min-w-[420px] text-sm">
+                            <thead>
+                              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                                <th className="px-2 py-1.5 font-medium">Project</th>
+                                <th className="px-2 py-1.5 font-medium">Task</th>
+                                <th className="px-2 py-1.5 text-right font-medium">Hours</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {h.entries.map((e) => (
+                                <tr key={e.id} className="border-b border-border last:border-0">
+                                  <td className="px-2 py-1.5">{e.project}</td>
+                                  <td className="px-2 py-1.5 text-muted-foreground">
+                                    {e.task || "—"}
+                                  </td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums">
+                                    {formatDuration(e.hours)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-sm text-muted-foreground">
+                          No work entries were logged on this day.
+                        </p>
+                      )}
+
+                      {(h.plannedWork || h.workCompleted || h.remarks) && (
+                        <dl className="mt-3 space-y-2 text-sm">
+                          {h.plannedWork && (
+                            <div>
+                              <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                Planned
+                              </dt>
+                              <dd className="whitespace-pre-wrap">{h.plannedWork}</dd>
+                            </div>
+                          )}
+                          {h.workCompleted && (
+                            <div>
+                              <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                Completed
+                              </dt>
+                              <dd className="whitespace-pre-wrap">{h.workCompleted}</dd>
+                            </div>
+                          )}
+                          {h.remarks && (
+                            <div>
+                              <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                Remarks
+                              </dt>
+                              <dd className="whitespace-pre-wrap italic text-muted-foreground">
+                                {h.remarks}
+                              </dd>
+                            </div>
+                          )}
+                        </dl>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Project & Task Logging — today's split, edited on the Today tab only */}
+      {tab === "today" && (
       <Card className={!isLoggedIn ? "opacity-60" : undefined}>
         <CardHeader>
           <CardTitle>Project &amp; Task Logging</CardTitle>

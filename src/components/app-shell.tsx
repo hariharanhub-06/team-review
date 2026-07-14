@@ -20,6 +20,7 @@ export interface NavItem {
 
 const MEMBER_NAV: NavItem[] = [
   { href: "/dashboard", label: "Today", icon: "🗓️", tab: "today" },
+  { href: "/dashboard?tab=work", label: "Work Logs", icon: "📋", tab: "work" },
   { href: "/dashboard?tab=tasks", label: "My Tasks", icon: "✅", tab: "tasks" },
   { href: "/dashboard/account", label: "Change Password", icon: "🔒" },
 ];
@@ -71,17 +72,18 @@ export function AppShell({
 
   return (
     <div className="flex min-h-screen">
-      {/* Sidebar */}
+      {/* Sidebar — pinned to the viewport so it never scrolls away with the page content. */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 w-64 transform border-r border-border bg-card transition-transform md:static md:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 flex w-64 transform flex-col border-r border-border bg-card transition-transform",
+          "md:sticky md:top-0 md:bottom-auto md:h-screen md:shrink-0 md:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="flex h-16 items-center border-b border-border px-4">
+        <div className="flex h-16 shrink-0 items-center border-b border-border px-4">
           <Logo size={34} />
         </div>
-        <nav className="space-y-1 p-3">
+        <nav className="scroll-thin flex-1 space-y-1 overflow-y-auto p-3">
           {nav.map((item) => {
             const active = isActive(item);
             return (
@@ -100,7 +102,7 @@ export function AppShell({
             );
           })}
         </nav>
-        <div className="absolute bottom-0 w-full border-t border-border p-4">
+        <div className="shrink-0 border-t border-border p-4">
           <p className="truncate text-sm font-medium">{name}</p>
           <p className="truncate text-xs text-muted-foreground">{email}</p>
           <span className="mt-1 inline-block rounded bg-muted px-2 py-0.5 text-xs">{role}</span>
