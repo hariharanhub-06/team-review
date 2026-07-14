@@ -36,7 +36,10 @@ export async function GET() {
           project: { select: { name: true } },
         },
       },
-      breaks: { select: { startAt: true, endAt: true } },
+      breaks: {
+        orderBy: { startAt: "asc" },
+        select: { id: true, type: true, startAt: true, endAt: true },
+      },
     },
   });
 
@@ -65,9 +68,10 @@ export async function GET() {
       entries: log.workEntries.map((e) => ({
         id: e.id,
         project: e.project?.name ?? "—",
-        task: e.taskDescription,
+        taskDescription: e.taskDescription,
         hours: e.hoursWorked,
       })),
+      breaks: log.breaks,
     };
   });
 

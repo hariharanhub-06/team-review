@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Badge,
@@ -106,7 +106,178 @@ interface HistoryDay {
   breakHours: number;
   netHours: number;
   workHours: number;
-  entries: { id: string; project: string; task: string; hours: number }[];
+  entries: { id: string; project: string; taskDescription: string; hours: number }[];
+  breaks: SerializedBreak[];
+}
+
+/** One labelled free-text block from the login/logout forms. Mirrors the admin view. */
+function NoteBlock({ title, text }: { title: string; text: string }) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </div>
+      <div className="whitespace-pre-wrap break-words rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
+        {text}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Expanded day-detail: notes, work-hour split, and breaks — the same panel an
+ * admin sees on the Work Logs page, with no edit controls.
+ */
+function HistoryRowDetail({ day }: { day: HistoryDay }) {
+  const notes = [
+    { title: "Planned Work (at login)", text: day.plannedWork?.trim() ?? "" },
+    { title: "Work Completed (at logout)", text: day.workCompleted?.trim() ?? "" },
+    { title: "Remarks", text: day.remarks?.trim() ?? "" },
+  ].filter((n) => n.text.length > 0);
+
+  const total = day.workHours > 0 ? day.workHours : 0;
+
+  return (
+    <div className="space-y-5 px-2 py-4">
+      {/* Session summary */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs">
+        <span className="text-muted-foreground">
+          Login:{" "}
+          <span className="font-medium text-foreground">{formatTime(day.loginAt)}</span>
+        </span>
+        <span className="text-muted-foreground">
+          Logout:{" "}
+          <span className="font-medium text-foreground">{formatTime(day.logoutAt)}</span>
+        </span>
+        <span className="text-muted-foreground">
+          Break total:{" "}
+          <span className="font-medium text-[hsl(var(--warning))]">
+            {formatDurationPrecise(day.breakHours)}
+          </span>
+        </span>
+        <span className="text-muted-foreground">
+          Net active:{" "}
+          <span className="font-medium text-foreground">
+            {formatDurationPrecise(day.netHours)}
+          </span>
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {/* Notes */}
+        <div className="space-y-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+            Notes
+          </h4>
+          {notes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No notes recorded.</p>
+          ) : (
+            <div className="space-y-3">
+              {notes.map((n) => (
+                <NoteBlock key={n.title} title={n.title} text={n.text} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Work-hours split */}
+        <div className="space-y-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+            Work hours split
+          </h4>
+          {day.entries.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No work entries logged.</p>
+          ) : (
+            <div className="overflow-x-auto scroll-thin rounded-md border border-border">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30 text-left uppercase tracking-wide text-muted-foreground">
+                    <th className="px-3 py-2 font-medium">Project</th>
+                    <th className="px-3 py-2 font-medium">Task</th>
+                    <th className="px-3 py-2 text-right font-medium">Hours</th>
+                    <th className="w-32 px-3 py-2 font-medium">Share</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {day.entries.map((entry) => {
+                    const pct = total > 0 ? (entry.hours / total) * 100 : 0;
+                    return (
+                      <tr key={entry.id} className="border-b border-border last:border-0">
+                        <td className="px-3 py-2 font-medium text-foreground">
+                          {entry.project}
+                        </td>
+                        <td className="break-words px-3 py-2 text-muted-foreground">
+                          {entry.taskDescription}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-foreground">
+                          {formatDurationPrecise(entry.hours)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className="h-full rounded-full bg-primary"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <span className="w-10 shrink-0 text-right tabular-nums text-muted-foreground">
+                              {Math.round(pct)}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-border bg-muted/30 font-semibold text-foreground">
+                    <td className="px-3 py-2" colSpan={2}>
+                      Total
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                      {formatDurationPrecise(day.workHours)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                      100%
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Breaks */}
+      <div className="space-y-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+          Breaks
+        </h4>
+        {day.breaks.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No breaks taken.</p>
+        ) : (
+          <ul className="space-y-1">
+            {day.breaks.map((b) => (
+              <li
+                key={b.id}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs"
+              >
+                <Badge tone="warning">{BREAK_LABELS[b.type]}</Badge>
+                <span className="tabular-nums text-muted-foreground">
+                  {formatTime(b.startAt)} → {b.endAt ? formatTime(b.endAt) : "ongoing"}
+                </span>
+                {b.endAt && (
+                  <span className="ml-auto font-medium tabular-nums text-[hsl(var(--warning))]">
+                    {formatDurationPrecise(hoursBetween(b.startAt, b.endAt))}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
 }
 
 interface EntryRow {
@@ -182,6 +353,16 @@ export function DashboardClient({
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const historyRequested = useRef(false);
+  // Days whose detail row is dropped down. Several can be open at once.
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
+
+  function toggleDay(id: string) {
+    setExpandedDays((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (tab !== "work" || historyRequested.current) return;
@@ -834,82 +1015,89 @@ export function DashboardClient({
                   only.
                 </p>
                 <div className="overflow-x-auto scroll-thin">
-                  <table className="w-full min-w-[900px] text-sm">
+                  <table className="w-full min-w-[720px] text-sm">
                     <thead>
                       <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                        <th className="px-2 py-2 font-medium">Date</th>
-                        <th className="px-2 py-2 font-medium">Login</th>
-                        <th className="px-2 py-2 font-medium">Logout</th>
-                        <th className="px-2 py-2 text-right font-medium">Break</th>
-                        <th className="px-2 py-2 text-right font-medium">Net</th>
-                        <th className="px-2 py-2 text-right font-medium">Logged</th>
-                        <th className="px-2 py-2 font-medium">Status</th>
-                        <th className="px-2 py-2 font-medium">Projects &amp; Tasks</th>
-                        <th className="px-2 py-2 font-medium">Work / Remarks</th>
+                        <th className="w-8 px-2 py-2" />
+                        <th className="px-2 py-2">Date</th>
+                        <th className="px-2 py-2">Login</th>
+                        <th className="px-2 py-2">Logout</th>
+                        <th className="px-2 py-2 text-right">Hours</th>
+                        <th className="px-2 py-2 text-right">Break</th>
+                        <th className="px-2 py-2 text-right">Net Active</th>
+                        <th className="px-2 py-2 text-right">Work Hours</th>
+                        <th className="px-2 py-2">Status</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {history.map((h) => (
-                        <tr
-                          key={h.id}
-                          className="border-b border-border align-top last:border-0"
-                        >
-                          <td className="whitespace-nowrap px-2 py-2 font-medium">
-                            {formatDate(h.date)}
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">
-                            {formatTime(h.loginAt)}
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">
-                            {formatTime(h.logoutAt)}
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-muted-foreground">
-                            {formatDuration(h.breakHours)}
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums">
-                            {formatDuration(h.netHours)}
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums font-semibold">
-                            {formatDuration(h.workHours)}
-                          </td>
-                          <td className="px-2 py-2">
-                            <StatusBadge status={h.status} />
-                          </td>
-                          <td className="px-2 py-2">
-                            {h.entries.length === 0 ? (
-                              <span className="text-muted-foreground">—</span>
-                            ) : (
-                              <ul className="space-y-0.5">
-                                {h.entries.map((e) => (
-                                  <li key={e.id}>
-                                    {e.project}
-                                    {e.task && (
-                                      <span className="text-muted-foreground">
-                                        {" "}
-                                        · {e.task}
-                                      </span>
-                                    )}{" "}
-                                    <span className="tabular-nums text-muted-foreground">
-                                      ({formatDuration(e.hours)})
-                                    </span>
-                                  </li>
-                                ))}
-                              </ul>
+                      {history.map((h) => {
+                        const isOpen = expandedDays.has(h.id);
+                        return (
+                          <Fragment key={h.id}>
+                            <tr
+                              className="cursor-pointer border-b border-border align-top hover:bg-accent/50"
+                              onClick={() => toggleDay(h.id)}
+                            >
+                              <td className="px-2 py-2">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleDay(h.id);
+                                  }}
+                                  aria-expanded={isOpen}
+                                  aria-label={
+                                    isOpen ? "Collapse details" : "Expand details"
+                                  }
+                                  className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted"
+                                >
+                                  <span
+                                    className={
+                                      isOpen
+                                        ? "rotate-90 transition-transform"
+                                        : "transition-transform"
+                                    }
+                                  >
+                                    ▶
+                                  </span>
+                                </button>
+                              </td>
+                              <td className="whitespace-nowrap px-2 py-2 text-foreground">
+                                {formatDate(h.date)}
+                              </td>
+                              <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">
+                                {formatTime(h.loginAt)}
+                              </td>
+                              <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">
+                                {formatTime(h.logoutAt)}
+                              </td>
+                              <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
+                                {formatDurationPrecise(h.loginHours)}
+                              </td>
+                              <td className="px-2 py-2 text-right tabular-nums text-[hsl(var(--warning))]">
+                                {h.breakHours ? formatDurationPrecise(h.breakHours) : "—"}
+                              </td>
+                              <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
+                                {formatDurationPrecise(h.netHours)}
+                              </td>
+                              <td className="px-2 py-2 text-right tabular-nums text-foreground">
+                                {formatDurationPrecise(h.workHours)}
+                              </td>
+                              <td className="px-2 py-2">
+                                <StatusBadge status={h.status} />
+                              </td>
+                            </tr>
+                            {isOpen && (
+                              <tr className="border-b border-border bg-muted/20">
+                                {/* 9 columns in the header above */}
+                                <td colSpan={9} className="p-0">
+                                  <HistoryRowDetail day={h} />
+                                </td>
+                              </tr>
                             )}
-                          </td>
-                          <td className="max-w-xs px-2 py-2 text-muted-foreground">
-                            {h.workCompleted && (
-                              <div className="whitespace-pre-wrap">{h.workCompleted}</div>
-                            )}
-                            {h.remarks && (
-                              <div className="whitespace-pre-wrap text-xs italic">
-                                {h.remarks}
-                              </div>
-                            )}
-                            {!h.workCompleted && !h.remarks && "—"}
-                          </td>
-                        </tr>
-                      ))}
+                          </Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
