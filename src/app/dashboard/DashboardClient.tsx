@@ -1,6 +1,15 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Badge,
@@ -27,6 +36,7 @@ import {
 } from "@/lib/utils";
 import { criticalityLabel } from "@/lib/scoring";
 import { buildSlots } from "@/lib/hour-slots";
+import { Markdown } from "@/components/markdown";
 
 /* ---------------- Types ---------------- */
 type DayStatus = "COMPLETED" | "IN_PROGRESS" | "BLOCKED";
@@ -126,8 +136,8 @@ function NoteBlock({ title, text }: { title: string; text: string }) {
       <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
       </div>
-      <div className="whitespace-pre-wrap break-words rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
-        {text}
+      <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+        <Markdown>{text}</Markdown>
       </div>
     </div>
   );
@@ -337,21 +347,24 @@ function blankRow(): EntryRow {
 const CUSTOM_TASK = "__custom__";
 
 /* ---------------- Hours Report (hour module) ---------------- */
+export interface HoursReportHandle {
+  /** Persist pending text in the open window. No-op when nothing is pending. */
+  flush: () => Promise<void>;
+}
+
 /**
  * The day split into fixed windows from the login time. Only the window holding
  * "now" is writable; it autosaves as they type and freezes the moment it passes.
  * A window that closed with nothing in it reads "No entries" — for good: only an
  * admin can fill it in afterwards, from Work Logs.
  */
-function HoursReport({
-  log,
-  intervalHours,
-  now,
-}: {
+const HoursReport = forwardRef<HoursReportHandle, {
   log: SerializedLog | null;
   intervalHours: number;
   now: number;
-}) {
+  /** Lets the parent warn at logout while a window is still open and empty. */
+  onOpenWindow?: (w: { label: string; empty: boolean } | null) => void;
+}>(function HoursReport({ log, intervalHours, now, onOpenWindow }, ref) {
   const [slots, setSlots] = useState<SerializedHourSlot[]>(log?.hourSlots ?? []);
   const [draft, setDraft] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">(
@@ -370,6 +383,53 @@ function HoursReport({
   const contentFor = (key: string) =>
     slots.find((s) => new Date(s.startAt).toISOString() === key)?.content ?? "";
 
+  const dirty = useRef(false);
+
+  /** Persist one window's text. Shared by the debounce and by flush(). */
+  const saveWindow = useCallback(async (key: string, text: string) => {
+    setSaveState("saving");
+    setSaveError(null);
+    try {
+      const res = await fetch("/api/daily-log/hour-slot", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ startAt: key, content: text }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Couldn't save");
+
+      setSlots((prev) => {
+        const rest = prev.filter((s) => new Date(s.startAt).toISOString() !== key);
+        return data.slot ? [...rest, data.slot as SerializedHourSlot] : rest;
+      });
+      dirty.current = false;
+      setSaveState("saved");
+    } catch (e) {
+      setSaveState("error");
+      setSaveError(e instanceof Error ? e.message : "Couldn't save");
+      throw e;
+    }
+  }, []);
+
+  // Mark Logout calls this first: the debounce below would otherwise still be
+  // pending, and closing the day would lock the window with the text unsaved.
+  useImperativeHandle(
+    ref,
+    () => ({
+      async flush() {
+        if (!currentKey || !dirty.current) return;
+        try {
+          await saveWindow(currentKey, draft);
+        } catch {
+          throw new Error(
+            "Couldn't save your hours report — check your connection and try again."
+          );
+        }
+      },
+    }),
+    [currentKey, draft, saveWindow]
+  );
+
   // When the active window rolls over, load that window's saved text into the
   // box. The previous window's text stays put in `slots`, now locked.
   const loadedKey = useRef<string | null>(null);
@@ -377,6 +437,8 @@ function HoursReport({
     if (currentKey === loadedKey.current) return;
     loadedKey.current = currentKey;
     setDraft(currentKey ? contentFor(currentKey) : "");
+    // The old window is gone; its text belonged to it, not to the new one.
+    dirty.current = false;
     setSaveState("idle");
     setSaveError(null);
     // contentFor reads `slots`, but we deliberately only resync on window change.
@@ -384,36 +446,23 @@ function HoursReport({
   }, [currentKey]);
 
   // Debounced autosave of the open window.
-  const dirty = useRef(false);
   useEffect(() => {
     if (!currentKey || !dirty.current) return;
-    const id = setTimeout(async () => {
-      setSaveState("saving");
-      setSaveError(null);
-      try {
-        const res = await fetch("/api/daily-log/hour-slot", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ startAt: currentKey, content: draft }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error ?? "Couldn't save");
-
-        setSlots((prev) => {
-          const rest = prev.filter(
-            (s) => new Date(s.startAt).toISOString() !== currentKey
-          );
-          return data.slot ? [...rest, data.slot as SerializedHourSlot] : rest;
-        });
-        dirty.current = false;
-        setSaveState("saved");
-      } catch (e) {
-        setSaveState("error");
-        setSaveError(e instanceof Error ? e.message : "Couldn't save");
-      }
+    const id = setTimeout(() => {
+      // Errors surface via saveState; nothing else to do here.
+      saveWindow(currentKey, draft).catch(() => {});
     }, 800);
     return () => clearTimeout(id);
-  }, [draft, currentKey]);
+  }, [draft, currentKey, saveWindow]);
+
+  // Keep the parent's logout warning in step with the open window.
+  const openLabel = current
+    ? `${formatTime(current.startAt)} – ${formatTime(current.endAt)}`
+    : null;
+  const openEmpty = draft.trim().length === 0;
+  useEffect(() => {
+    onOpenWindow?.(openLabel ? { label: openLabel, empty: openEmpty } : null);
+  }, [openLabel, openEmpty, onOpenWindow]);
 
   if (!log?.loginAt) {
     return (
@@ -505,7 +554,7 @@ function HoursReport({
       </CardContent>
     </Card>
   );
-}
+});
 
 /* ---------------- Component ---------------- */
 export function DashboardClient({
@@ -615,6 +664,24 @@ export function DashboardClient({
   const [entriesPending, setEntriesPending] = useState(false);
   const [entriesError, setEntriesError] = useState<string | null>(null);
   const [entriesSaved, setEntriesSaved] = useState(false);
+
+  // Hours report — the ref lets logout flush any pending text before closing the
+  // day; openWindow drives the "you haven't filled this window" warning.
+  const hoursRef = useRef<HoursReportHandle>(null);
+  const [openWindow, setOpenWindow] = useState<{
+    label: string;
+    empty: boolean;
+  } | null>(null);
+  const handleOpenWindow = useCallback(
+    (w: { label: string; empty: boolean } | null) => {
+      setOpenWindow((prev) => {
+        if (prev === w) return prev;
+        if (prev && w && prev.label === w.label && prev.empty === w.empty) return prev;
+        return w;
+      });
+    },
+    []
+  );
 
   // Logout form
   const [workCompleted, setWorkCompleted] = useState(
@@ -799,6 +866,9 @@ export function DashboardClient({
     setLogoutPending(true);
     setLogoutError(null);
     try {
+      // Closing the day locks the open window, so land any pending autosave
+      // first — otherwise the last thing they typed dies with the debounce.
+      await hoursRef.current?.flush();
       const res = await fetch("/api/daily-log/logout", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1295,7 +1365,13 @@ export function DashboardClient({
 
       {/* Today tab — Hours Report, when the admin enabled the hour module. */}
       {tab === "today" && hourModuleHours !== null && (
-        <HoursReport log={log} intervalHours={hourModuleHours} now={now} />
+        <HoursReport
+          ref={hoursRef}
+          log={log}
+          intervalHours={hourModuleHours}
+          now={now}
+          onOpenWindow={handleOpenWindow}
+        />
       )}
 
       {/* Project & Task Logging — today's split. Sits directly above Mark Logout,
@@ -1528,6 +1604,12 @@ export function DashboardClient({
                   Split your day across projects before logging out — add at least one
                   work entry above and hit <strong>Save Entries</strong>. Without it your
                   work hours for today are recorded as zero.
+                </p>
+              )}
+              {openWindow?.empty && (
+                <p className="rounded-md bg-[hsl(var(--warning))]/10 px-3 py-2 text-sm text-[hsl(var(--warning))]">
+                  ⏱️ Your {openWindow.label} window is empty. Fill it in above before you
+                  log out — once the day closes, only an admin can change it.
                 </p>
               )}
               {hoursByProjectBlock}
