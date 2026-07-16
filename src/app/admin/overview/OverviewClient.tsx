@@ -12,7 +12,12 @@ import {
   StatCard,
   StatusBadge,
 } from "@/components/ui";
-import { formatDate, formatTime, formatDurationPrecise } from "@/lib/utils";
+import {
+  formatDate,
+  formatTime,
+  formatDurationPrecise,
+  hoursBetween,
+} from "@/lib/utils";
 
 interface Option {
   id: string;
@@ -156,6 +161,14 @@ function breakElapsedHours(b: BreakItem): number {
   const ms = new Date(b.endAt).getTime() - new Date(b.startAt).getTime();
   if (!Number.isFinite(ms) || ms <= 0) return 0;
   return ms / 3_600_000;
+}
+
+/** A timestamp as the local-wall-clock value expected by <input type="datetime-local">. */
+function toLocalInput(value: string | Date): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
 }
 
 /** One labelled free-text block from the member's login/logout forms. */
@@ -328,6 +341,157 @@ function RowDetail({ row }: { row: Row }) {
             ))}
           </ul>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Back-fill a logout time for a day the member forgot to close. */
+function SetLogoutModal({
+  row,
+  onClose,
+  onSaved,
+}: {
+  row: Row;
+  onClose: () => void;
+  onSaved: (row: Row) => void;
+}) {
+  // Default to the login moment on the correct day — the admin just nudges the time forward.
+  const [value, setValue] = useState<string>(() =>
+    row.loginAt ? toLocalInput(row.loginAt) : ""
+  );
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Live preview of the resulting session length, so a typo'd time is obvious.
+  const previewHours =
+    row.loginAt && value ? hoursBetween(row.loginAt, new Date(value)) : 0;
+  const valid = !!value && row.loginAt !== null && new Date(value) > new Date(row.loginAt);
+
+  async function save() {
+    if (!valid) return;
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/logs/${row.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "setLogout",
+          logoutAt: new Date(value).toISOString(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Failed to set logout time");
+
+      // Recompute the derived fields exactly as the logs API does, so the row
+      // updates in place without a full reload (keeps the expanded panel open).
+      const logoutIso = new Date(value).toISOString();
+      const loginHours = hoursBetween(row.loginAt, logoutIso);
+      const breakHours = row.breaks.reduce(
+        (sum, b) => sum + hoursBetween(b.startAt, b.endAt ?? logoutIso),
+        0
+      );
+      onSaved({
+        ...row,
+        logoutAt: logoutIso,
+        sessionStatus: "COMPLETED",
+        loginHours,
+        breakHours,
+        netActiveHours: Math.max(0, loginHours - breakHours),
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to set logout time");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:items-center"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="w-full max-w-md rounded-lg border border-border bg-card shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Set logout time"
+      >
+        <div className="flex items-center justify-between gap-2 border-b border-border p-4">
+          <h2 className="min-w-0 break-words text-lg font-semibold">
+            Set logout — {row.userName}, {formatDate(row.date)}
+          </h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ✕
+          </Button>
+        </div>
+
+        <div className="space-y-3 p-4">
+          <p className="text-sm text-muted-foreground">
+            Logged in at{" "}
+            <span className="font-medium text-foreground">
+              {row.loginAt ? formatTime(row.loginAt) : "—"}
+            </span>
+            . Set when they actually left; their work entries are untouched.
+          </p>
+
+          <div>
+            <Label htmlFor="logout-at">Logout time</Label>
+            <Input
+              id="logout-at"
+              type="datetime-local"
+              value={value}
+              min={row.loginAt ? toLocalInput(row.loginAt) : undefined}
+              max={toLocalInput(new Date())}
+              onChange={(e) => setValue(e.target.value)}
+            />
+          </div>
+
+          {value && (
+            <p className="text-sm text-muted-foreground">
+              Session length:{" "}
+              <span
+                className={
+                  valid
+                    ? "font-medium text-foreground"
+                    : "font-medium text-destructive"
+                }
+              >
+                {valid
+                  ? formatDurationPrecise(previewHours)
+                  : "logout must be after login"}
+              </span>
+            </p>
+          )}
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border p-4">
+          <Button variant="outline" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={pending || !valid}>
+            {pending ? "Saving…" : "Set logout"}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -603,6 +767,13 @@ export default function OverviewClient({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Row | null>(null);
+  const [settingLogout, setSettingLogout] = useState<Row | null>(null);
+
+  /** Fold a back-filled logout (and its recomputed hours) into the table. */
+  function applyLogout(updated: Row) {
+    setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+    setSettingLogout(null);
+  }
 
   /** Fold an admin-edited work split back into the table without a full reload. */
   function applyEntries(rowId: string, entries: Entry[], totalWorkHours: number) {
@@ -935,6 +1106,18 @@ export default function OverviewClient({
                           </td>
                           <td className="px-2 py-2">
                             <div className="flex items-center justify-end gap-1">
+                              {row.loginAt && !row.logoutAt && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title="Forgot to log out — set the logout time"
+                                  aria-label="Set logout time"
+                                  disabled={busyId === row.id}
+                                  onClick={() => setSettingLogout(row)}
+                                >
+                                  ⏱️
+                                </Button>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -1001,6 +1184,14 @@ export default function OverviewClient({
           onSaved={(entries, totalWorkHours) =>
             applyEntries(editing.id, entries, totalWorkHours)
           }
+        />
+      )}
+
+      {settingLogout && (
+        <SetLogoutModal
+          row={settingLogout}
+          onClose={() => setSettingLogout(null)}
+          onSaved={applyLogout}
         />
       )}
     </div>

@@ -2,17 +2,21 @@ import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { z } from "zod";
 
-const patchSchema = z.object({
-  action: z.enum(["undoLogout", "undoBreaks"]),
-});
+const patchSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("undoLogout") }),
+  z.object({ action: z.literal("undoBreaks") }),
+  z.object({ action: z.literal("setLogout"), logoutAt: z.string().datetime() }),
+]);
 
 /**
  * Admin correction actions on a member's daily log.
  *
- * PATCH { action: "undoLogout" }  -> clears logoutAt / workCompleted / remarks so the
- *                                    member can carry on and mark logout properly later
- *                                    (e.g. they hit "Mark Logout" by mistake in the morning).
- * PATCH { action: "undoBreaks" }  -> removes every break recorded for that day.
+ * PATCH { action: "undoLogout" }              -> clears logoutAt / workCompleted / remarks so the
+ *                                                member can carry on and mark logout properly later
+ *                                                (e.g. they hit "Mark Logout" by mistake in the morning).
+ * PATCH { action: "undoBreaks" }              -> removes every break recorded for that day.
+ * PATCH { action: "setLogout", logoutAt }     -> back-fills a logout time when the member forgot to
+ *                                                mark logout, so the day's hours can be calculated.
  */
 export async function PATCH(
   request: Request,
@@ -48,6 +52,33 @@ export async function PATCH(
     const updated = await prisma.dailyLog.update({
       where: { id },
       data: { logoutAt: null, workCompleted: null, remarks: null, status: null },
+    });
+    return Response.json({ log: updated });
+  }
+
+  if (parsed.data.action === "setLogout") {
+    if (!log.loginAt) {
+      return Response.json(
+        { error: "This day has no login to attach a logout to" },
+        { status: 400 }
+      );
+    }
+    const logoutAt = new Date(parsed.data.logoutAt);
+    if (logoutAt.getTime() <= log.loginAt.getTime()) {
+      return Response.json(
+        { error: "Logout time must be after the login time" },
+        { status: 400 }
+      );
+    }
+    if (logoutAt.getTime() > Date.now()) {
+      return Response.json(
+        { error: "Logout time can't be in the future" },
+        { status: 400 }
+      );
+    }
+    const updated = await prisma.dailyLog.update({
+      where: { id },
+      data: { logoutAt },
     });
     return Response.json({ log: updated });
   }
