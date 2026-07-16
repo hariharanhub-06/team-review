@@ -13,7 +13,7 @@ export default async function DashboardPage() {
 
   const date = todayUtc();
 
-  const [log, projects, assigned, myEntries] = await Promise.all([
+  const [log, projects, assigned, myEntries, hourModule] = await Promise.all([
     prisma.dailyLog.findUnique({
       where: { userId_date: { userId: s.sub, date } },
       include: {
@@ -22,6 +22,7 @@ export default async function DashboardPage() {
           orderBy: { id: "asc" },
         },
         breaks: { orderBy: { startAt: "asc" } },
+        hourSlots: { orderBy: { startAt: "asc" } },
       },
     }),
     prisma.project.findMany({
@@ -42,6 +43,10 @@ export default async function DashboardPage() {
     prisma.workEntry.findMany({
       where: { dailyLog: { userId: s.sub } },
       select: { taskId: true, projectId: true, taskDescription: true, hoursWorked: true },
+    }),
+    prisma.user.findUnique({
+      where: { id: s.sub },
+      select: { hourModuleEnabled: true, hourModuleHours: true },
     }),
   ]);
 
@@ -79,6 +84,9 @@ export default async function DashboardPage() {
       projects={projects}
       tasks={tasks}
       userName={s.name}
+      hourModuleHours={
+        hourModule?.hourModuleEnabled ? hourModule.hourModuleHours ?? null : null
+      }
     />
   );
 }

@@ -12,6 +12,8 @@ const userSelect = {
   expectedDailyHours: true,
   active: true,
   createdAt: true,
+  hourModuleEnabled: true,
+  hourModuleHours: true,
 } as const;
 
 export async function PATCH(
@@ -42,7 +44,16 @@ export async function PATCH(
     );
   }
 
-  const { name, email, password, role, expectedDailyHours, active } = parsed.data;
+  const {
+    name,
+    email,
+    password,
+    role,
+    expectedDailyHours,
+    active,
+    hourModuleEnabled,
+    hourModuleHours,
+  } = parsed.data;
 
   const data: Prisma.UserUpdateInput = {};
   if (name !== undefined) data.name = name;
@@ -53,6 +64,9 @@ export async function PATCH(
   if (password !== undefined && password !== "") {
     data.passwordHash = await bcrypt.hash(password, 10);
   }
+  // Turning the module off clears the interval, so it can't silently reapply later.
+  data.hourModuleEnabled = hourModuleEnabled;
+  data.hourModuleHours = hourModuleEnabled ? hourModuleHours ?? null : null;
 
   try {
     const user = await prisma.user.update({

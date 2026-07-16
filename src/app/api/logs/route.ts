@@ -36,13 +36,21 @@ export async function GET(request: Request) {
     where,
     orderBy: { date: "desc" },
     include: {
-      user: { select: { name: true, email: true } },
+      user: {
+        select: {
+          name: true,
+          email: true,
+          hourModuleEnabled: true,
+          hourModuleHours: true,
+        },
+      },
       workEntries: {
         where: projectId ? { projectId } : undefined,
         include: { project: { select: { name: true } } },
         orderBy: { id: "asc" },
       },
       breaks: { orderBy: { startAt: "asc" } },
+      hourSlots: { orderBy: { startAt: "asc" } },
     },
   });
 
@@ -83,6 +91,16 @@ export async function GET(request: Request) {
         plannedWork: log.plannedWork,
         workCompleted: log.workCompleted,
         remarks: log.remarks,
+        // Hour module: null interval means the module is off for this member,
+        // and the admin UI hides the section entirely.
+        hourModuleHours: log.user.hourModuleEnabled
+          ? log.user.hourModuleHours
+          : null,
+        hourSlots: log.hourSlots.map((s) => ({
+          startAt: s.startAt,
+          endAt: s.endAt,
+          content: s.content,
+        })),
         totalWorkHours: round(totalWorkHours),
         entries: log.workEntries.map((e) => ({
           projectId: e.projectId,

@@ -17,6 +17,8 @@ export default async function AdminUsersPage() {
       expectedDailyHours: true,
       active: true,
       createdAt: true,
+      hourModuleEnabled: true,
+      hourModuleHours: true,
     },
     orderBy: { createdAt: "desc" },
   });

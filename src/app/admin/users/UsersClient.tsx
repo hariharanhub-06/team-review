@@ -23,6 +23,8 @@ export interface User {
   expectedDailyHours: number;
   active: boolean;
   createdAt: string;
+  hourModuleEnabled: boolean;
+  hourModuleHours: number | null;
 }
 
 interface HistoryRow {
@@ -100,6 +102,8 @@ interface FormState {
   role: "ADMIN" | "MEMBER";
   expectedDailyHours: string;
   active: boolean;
+  hourModuleEnabled: boolean;
+  hourModuleHours: string;
 }
 
 const emptyForm: FormState = {
@@ -109,6 +113,8 @@ const emptyForm: FormState = {
   role: "MEMBER",
   expectedDailyHours: "8",
   active: true,
+  hourModuleEnabled: false,
+  hourModuleHours: "1",
 };
 
 export function UsersClient({
@@ -159,6 +165,8 @@ export function UsersClient({
       role: u.role,
       expectedDailyHours: String(u.expectedDailyHours),
       active: u.active,
+      hourModuleEnabled: u.hourModuleEnabled,
+      hourModuleHours: u.hourModuleHours ? String(u.hourModuleHours) : "1",
     });
     setFormError(null);
     setFormOpen(true);
@@ -169,11 +177,16 @@ export function UsersClient({
     setSaving(true);
     setFormError(null);
 
+    // The hour module only applies to members — an admin has no daily log to split.
+    const hourModuleEnabled = form.role === "MEMBER" && form.hourModuleEnabled;
+
     const payload: Record<string, unknown> = {
       name: form.name,
       email: form.email,
       role: form.role,
       expectedDailyHours: Number(form.expectedDailyHours),
+      hourModuleEnabled,
+      hourModuleHours: hourModuleEnabled ? Number(form.hourModuleHours) : null,
     };
 
     if (editing) {
@@ -300,7 +313,18 @@ export function UsersClient({
                         {u.role}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3">{u.expectedDailyHours}h</td>
+                    <td className="px-4 py-3">
+                      {u.expectedDailyHours}h
+                      {u.hourModuleEnabled && u.hourModuleHours && (
+                        <Badge
+                          tone="info"
+                          className="ml-2"
+                          title={`Hour module on — reports every ${u.hourModuleHours}h from login`}
+                        >
+                          ⏱️ {u.hourModuleHours}h
+                        </Badge>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <Badge tone={u.active ? "success" : "destructive"}>
                         {u.active ? "Active" : "Inactive"}
@@ -431,6 +455,53 @@ export function UsersClient({
               />
               Active
             </label>
+          )}
+
+          {/* Hour module — members only; an admin has no daily log to split. */}
+          {form.role === "MEMBER" && (
+            <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+              <label className="flex items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  className="mt-0.5 h-4 w-4 rounded border-input"
+                  checked={form.hourModuleEnabled}
+                  onChange={(e) =>
+                    setForm({ ...form, hourModuleEnabled: e.target.checked })
+                  }
+                />
+                <span>
+                  <span className="font-medium">Hour Module</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Splits their day into fixed windows from their login time. They
+                    report what they did in each one, and each window locks when it
+                    passes.
+                  </span>
+                </span>
+              </label>
+
+              {form.hourModuleEnabled && (
+                <div>
+                  <Label htmlFor="u-hm-hours">Time frame (hours)</Label>
+                  <Input
+                    id="u-hm-hours"
+                    type="number"
+                    min={1}
+                    max={24}
+                    step="1"
+                    value={form.hourModuleHours}
+                    onChange={(e) =>
+                      setForm({ ...form, hourModuleHours: e.target.value })
+                    }
+                    required
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    A whole number from 1 to 24. With 1, a 09:36 login gives 09:36–10:36,
+                    10:36–11:36, and so on.
+                  </p>
+                </div>
+              )}
+            </div>
           )}
 
           {formError && (

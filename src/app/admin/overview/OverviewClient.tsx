@@ -11,7 +11,9 @@ import {
   CardContent,
   StatCard,
   StatusBadge,
+  Textarea,
 } from "@/components/ui";
+import { buildSlots } from "@/lib/hour-slots";
 import {
   formatDate,
   formatTime,
@@ -85,6 +87,12 @@ interface BreakItem {
   endAt: string | null;
 }
 
+interface HourSlotItem {
+  startAt: string;
+  endAt: string;
+  content: string;
+}
+
 interface Row {
   id: string;
   date: string;
@@ -104,6 +112,9 @@ interface Row {
   totalWorkHours: number;
   entries: Entry[];
   breaks: BreakItem[];
+  /** Window size in hours, or null when the hour module is off for this member. */
+  hourModuleHours: number | null;
+  hourSlots: HourSlotItem[];
 }
 
 interface Summary {
@@ -185,8 +196,148 @@ function NoteBlock({ title, text }: { title: string; text: string }) {
   );
 }
 
+/**
+ * The member's hour-module windows for a day, each amendable by an admin.
+ *
+ * Members can only write to the window that is currently open, so this is the
+ * only route by which a closed window (including one left empty) can be corrected.
+ */
+function HourSlotsPanel({
+  row,
+  onSaved,
+}: {
+  row: Row;
+  onSaved: (slots: HourSlotItem[]) => void;
+}) {
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const windows = buildSlots(row.loginAt, row.logoutAt, row.hourModuleHours);
+  if (windows.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No reporting windows — the member hadn&apos;t logged in.
+      </p>
+    );
+  }
+
+  const contentFor = (key: string) =>
+    row.hourSlots.find((s) => new Date(s.startAt).toISOString() === key)?.content ?? "";
+
+  async function save(key: string) {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/logs/${row.id}/hour-slots`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ startAt: key, content: draft }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Failed to save");
+
+      const rest = row.hourSlots.filter(
+        (s) => new Date(s.startAt).toISOString() !== key
+      );
+      onSaved(
+        data.slot
+          ? [...rest, data.slot as HourSlotItem].sort(
+              (a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
+            )
+          : rest
+      );
+      setEditingKey(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <ul className="space-y-2">
+        {windows.map((w) => {
+          const saved = contentFor(w.key);
+          const isEditing = editingKey === w.key;
+          return (
+            <li
+              key={w.key}
+              className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium tabular-nums text-foreground">
+                  {formatTime(w.startAt)} – {formatTime(w.endAt)}
+                </span>
+                {!saved && !isEditing && (
+                  <span className="italic text-muted-foreground">No entries</span>
+                )}
+                {!isEditing && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-6 w-6"
+                    title={saved ? "Edit this window" : "Add a report for this window"}
+                    aria-label="Edit hour report"
+                    onClick={() => {
+                      setEditingKey(w.key);
+                      setDraft(saved);
+                      setError(null);
+                    }}
+                  >
+                    ✏️
+                  </Button>
+                )}
+              </div>
+
+              {isEditing ? (
+                <div className="mt-2 space-y-2">
+                  <Textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    placeholder="What they did in this window (leave blank for no entries)"
+                    aria-label="Hour report content"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditingKey(null)}
+                      disabled={pending}
+                    >
+                      Cancel
+                    </Button>
+                    <Button size="sm" onClick={() => save(w.key)} disabled={pending}>
+                      {pending ? "Saving…" : "Save"}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                saved && (
+                  <p className="mt-1 whitespace-pre-wrap break-words text-foreground">
+                    {saved}
+                  </p>
+                )
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 /** Expanded day-detail: notes, work-hour split, and breaks. */
-function RowDetail({ row }: { row: Row }) {
+function RowDetail({
+  row,
+  onSlotsSaved,
+}: {
+  row: Row;
+  onSlotsSaved: (slots: HourSlotItem[]) => void;
+}) {
   const notes: { title: string; text: string }[] = [
     { title: "Planned Work (at login)", text: row.plannedWork?.trim() ?? "" },
     { title: "Work Completed (at logout)", text: row.workCompleted?.trim() ?? "" },
@@ -342,6 +493,16 @@ function RowDetail({ row }: { row: Row }) {
           </ul>
         )}
       </div>
+
+      {/* (D) Hours report — only for members with the hour module enabled. */}
+      {row.hourModuleHours !== null && (
+        <div className="space-y-2">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+            Hours report ({row.hourModuleHours}h windows)
+          </h4>
+          <HourSlotsPanel row={row} onSaved={onSlotsSaved} />
+        </div>
+      )}
     </div>
   );
 }
@@ -1161,7 +1322,16 @@ export default function OverviewClient({
                           <tr className="border-b border-border bg-muted/20">
                             {/* 11 columns in the header above */}
                             <td colSpan={11} className="p-0">
-                              <RowDetail row={row} />
+                              <RowDetail
+                                row={row}
+                                onSlotsSaved={(hourSlots) =>
+                                  setRows((prev) =>
+                                    prev.map((r) =>
+                                      r.id === row.id ? { ...r, hourSlots } : r
+                                    )
+                                  )
+                                }
+                              />
                             </td>
                           </tr>
                         )}

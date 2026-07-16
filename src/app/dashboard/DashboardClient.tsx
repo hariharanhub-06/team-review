@@ -26,6 +26,7 @@ import {
   round,
 } from "@/lib/utils";
 import { criticalityLabel } from "@/lib/scoring";
+import { buildSlots } from "@/lib/hour-slots";
 
 /* ---------------- Types ---------------- */
 type DayStatus = "COMPLETED" | "IN_PROGRESS" | "BLOCKED";
@@ -72,6 +73,13 @@ interface SerializedBreak {
   endAt: string | null;
 }
 
+interface SerializedHourSlot {
+  id: string;
+  startAt: string;
+  endAt: string;
+  content: string;
+}
+
 interface SerializedLog {
   id: string;
   userId: string;
@@ -84,6 +92,7 @@ interface SerializedLog {
   remarks: string | null;
   workEntries: SerializedWorkEntry[];
   breaks: SerializedBreak[];
+  hourSlots?: SerializedHourSlot[];
 }
 
 const BREAK_LABELS: Record<BreakType, string> = {
@@ -327,17 +336,191 @@ function blankRow(): EntryRow {
 
 const CUSTOM_TASK = "__custom__";
 
+/* ---------------- Hours Report (hour module) ---------------- */
+/**
+ * The day split into fixed windows from the login time. Only the window holding
+ * "now" is writable; it autosaves as they type and freezes the moment it passes.
+ * A window that closed with nothing in it reads "No entries" — for good: only an
+ * admin can fill it in afterwards, from Work Logs.
+ */
+function HoursReport({
+  log,
+  intervalHours,
+  now,
+}: {
+  log: SerializedLog | null;
+  intervalHours: number;
+  now: number;
+}) {
+  const [slots, setSlots] = useState<SerializedHourSlot[]>(log?.hourSlots ?? []);
+  const [draft, setDraft] = useState("");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">(
+    "idle"
+  );
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const windows = useMemo(
+    () => buildSlots(log?.loginAt, log?.logoutAt, intervalHours, new Date(now)),
+    [log?.loginAt, log?.logoutAt, intervalHours, now]
+  );
+
+  const current = windows.find((w) => w.active) ?? null;
+  const currentKey = current?.key ?? null;
+
+  const contentFor = (key: string) =>
+    slots.find((s) => new Date(s.startAt).toISOString() === key)?.content ?? "";
+
+  // When the active window rolls over, load that window's saved text into the
+  // box. The previous window's text stays put in `slots`, now locked.
+  const loadedKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (currentKey === loadedKey.current) return;
+    loadedKey.current = currentKey;
+    setDraft(currentKey ? contentFor(currentKey) : "");
+    setSaveState("idle");
+    setSaveError(null);
+    // contentFor reads `slots`, but we deliberately only resync on window change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentKey]);
+
+  // Debounced autosave of the open window.
+  const dirty = useRef(false);
+  useEffect(() => {
+    if (!currentKey || !dirty.current) return;
+    const id = setTimeout(async () => {
+      setSaveState("saving");
+      setSaveError(null);
+      try {
+        const res = await fetch("/api/daily-log/hour-slot", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ startAt: currentKey, content: draft }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error ?? "Couldn't save");
+
+        setSlots((prev) => {
+          const rest = prev.filter(
+            (s) => new Date(s.startAt).toISOString() !== currentKey
+          );
+          return data.slot ? [...rest, data.slot as SerializedHourSlot] : rest;
+        });
+        dirty.current = false;
+        setSaveState("saved");
+      } catch (e) {
+        setSaveState("error");
+        setSaveError(e instanceof Error ? e.message : "Couldn't save");
+      }
+    }, 800);
+    return () => clearTimeout(id);
+  }, [draft, currentKey]);
+
+  if (!log?.loginAt) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Hours Report</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Mark login to start your {intervalHours}-hour reporting windows.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Hours Report</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Your day in {intervalHours}-hour windows from {formatTime(log.loginAt)}. Only
+          the open window can be edited — once it passes it locks, and only an admin can
+          change it.
+        </p>
+
+        <ul className="space-y-3">
+          {windows.map((w) => {
+            const isCurrent = w.key === currentKey;
+            const saved = contentFor(w.key);
+            return (
+              <li
+                key={w.key}
+                className={cn(
+                  "rounded-lg border p-3",
+                  isCurrent
+                    ? "border-primary/50 bg-primary/5"
+                    : "border-border bg-muted/20"
+                )}
+              >
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold tabular-nums">
+                    {formatTime(w.startAt)} – {formatTime(w.endAt)}
+                  </span>
+                  {isCurrent ? (
+                    <Badge tone="info">Open now</Badge>
+                  ) : (
+                    <Badge tone="default">🔒 Locked</Badge>
+                  )}
+                </div>
+
+                {isCurrent ? (
+                  <>
+                    <Textarea
+                      placeholder="What are you working on in this window?"
+                      value={draft}
+                      onChange={(e) => {
+                        dirty.current = true;
+                        setDraft(e.target.value);
+                        setSaveState("idle");
+                      }}
+                      aria-label={`Report for ${formatTime(w.startAt)} to ${formatTime(
+                        w.endAt
+                      )}`}
+                    />
+                    <p className="mt-1 h-4 text-xs">
+                      {saveState === "saving" && (
+                        <span className="text-muted-foreground">Saving…</span>
+                      )}
+                      {saveState === "saved" && (
+                        <span className="text-[hsl(var(--success))]">✓ Saved</span>
+                      )}
+                      {saveState === "error" && (
+                        <span className="text-destructive">{saveError}</span>
+                      )}
+                    </p>
+                  </>
+                ) : saved ? (
+                  <p className="whitespace-pre-wrap text-sm">{saved}</p>
+                ) : (
+                  <p className="text-sm italic text-muted-foreground">No entries</p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
 /* ---------------- Component ---------------- */
 export function DashboardClient({
   initialLog,
   projects,
   tasks: initialTasks,
   userName,
+  hourModuleHours,
 }: {
   initialLog: SerializedLog | null;
   projects: SerializedProject[];
   tasks: SerializedTask[];
   userName: string;
+  /** Window size in hours, or null when the hour module is off for this member. */
+  hourModuleHours: number | null;
 }) {
   const [log, setLog] = useState<SerializedLog | null>(initialLog);
   const [tasks, setTasks] = useState<SerializedTask[]>(initialTasks);
@@ -499,12 +682,15 @@ export function DashboardClient({
   const openBreak = useMemo(() => breaks.find((b) => b.endAt === null) ?? null, [breaks]);
   const onBreak = !!openBreak;
 
-  // Tick every second while a break is running so the live counter actually moves;
-  // otherwise once a minute is plenty.
+  // Tick every second while a break is running so the live counter actually moves.
+  // With the hour module on, tick often enough that a window rollover is picked up
+  // promptly — a stale window would have the member typing into a box whose saves
+  // the server has already started rejecting. Otherwise once a minute is plenty.
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), onBreak ? 1_000 : 60_000);
+    const period = onBreak ? 1_000 : hourModuleHours !== null ? 5_000 : 60_000;
+    const id = setInterval(() => setNow(Date.now()), period);
     return () => clearInterval(id);
-  }, [onBreak]);
+  }, [onBreak, hourModuleHours]);
 
   // NOTE: keep full precision here — rounding to 1 decimal of an HOUR would snap the
   // value to 6-minute steps, making a live break look frozen (e.g. stuck on "6m").
@@ -1289,6 +1475,11 @@ export function DashboardClient({
         </CardContent>
       </Card>
 
+      )}
+
+      {/* Today tab — Hours Report, when the admin enabled the hour module. */}
+      {tab === "today" && hourModuleHours !== null && (
+        <HoursReport log={log} intervalHours={hourModuleHours} now={now} />
       )}
 
       {/* Today tab — Mark Logout */}

@@ -5,21 +5,64 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-export const userCreateSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  email: z.string().email(),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-  role: z.enum(["ADMIN", "MEMBER"]),
-  expectedDailyHours: z.coerce.number().min(0).max(24).default(8),
-});
+/**
+ * Hour module: an interval is required when the switch is on, and cleared when
+ * it's off, so a disabled module can never leave a stale interval behind.
+ */
+const hourModuleFields = {
+  hourModuleEnabled: z.boolean().default(false),
+  hourModuleHours: z.coerce
+    .number()
+    .int("Time frame must be a whole number of hours")
+    .min(1, "Time frame must be between 1 and 24 hours")
+    .max(24, "Time frame must be between 1 and 24 hours")
+    .nullable()
+    .optional(),
+};
 
-export const userUpdateSchema = z.object({
-  name: z.string().min(1).optional(),
-  email: z.string().email().optional(),
-  password: z.string().min(6).optional().or(z.literal("")),
-  role: z.enum(["ADMIN", "MEMBER"]).optional(),
-  expectedDailyHours: z.coerce.number().min(0).max(24).optional(),
-  active: z.boolean().optional(),
+const requireIntervalWhenEnabled = <T extends z.ZodTypeAny>(schema: T) =>
+  schema.superRefine(
+    (
+      data: { hourModuleEnabled?: boolean; hourModuleHours?: number | null },
+      ctx: z.RefinementCtx
+    ) => {
+      if (data.hourModuleEnabled && data.hourModuleHours == null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["hourModuleHours"],
+          message: "Set a time frame (1-24 hours) for the hour module",
+        });
+      }
+    }
+  );
+
+export const userCreateSchema = requireIntervalWhenEnabled(
+  z.object({
+    name: z.string().min(1, "Name is required"),
+    email: z.string().email(),
+    password: z.string().min(6, "Password must be at least 6 characters"),
+    role: z.enum(["ADMIN", "MEMBER"]),
+    expectedDailyHours: z.coerce.number().min(0).max(24).default(8),
+    ...hourModuleFields,
+  })
+);
+
+export const userUpdateSchema = requireIntervalWhenEnabled(
+  z.object({
+    name: z.string().min(1).optional(),
+    email: z.string().email().optional(),
+    password: z.string().min(6).optional().or(z.literal("")),
+    role: z.enum(["ADMIN", "MEMBER"]).optional(),
+    expectedDailyHours: z.coerce.number().min(0).max(24).optional(),
+    active: z.boolean().optional(),
+    ...hourModuleFields,
+  })
+);
+
+/** A member reporting what they did in one hour-module window. */
+export const hourSlotSchema = z.object({
+  startAt: z.string().datetime(),
+  content: z.string().max(2000, "Keep it under 2000 characters"),
 });
 
 export const markLoginSchema = z.object({

@@ -50,6 +50,12 @@ model User {
   active             Boolean    @default(true)
   createdAt          DateTime   @default(now())
 
+  /// When on, the member's day is split into fixed windows from their login time
+  /// and they report what they did in each. See hourModuleHours.
+  hourModuleEnabled  Boolean    @default(false)
+  /// Size of each reporting window, in whole hours (1-24). Null when disabled.
+  hourModuleHours    Int?
+
   dailyLogs          DailyLog[]
   assignedTasks      Task[]     @relation("TaskAssignee")
 }
@@ -70,9 +76,28 @@ model DailyLog {
 
   workEntries   WorkEntry[]
   breaks        Break[]
+  hourSlots     HourSlot[]
 
   @@unique([userId, date])
   @@index([date])
+}
+
+/// One reporting window of the hour module: what the member did between
+/// startAt and endAt. Only the window containing "now" is writable by the
+/// member; once it passes, the row is frozen and only an admin can amend it.
+/// Windows with nothing reported have no row at all — they render "No entries".
+model HourSlot {
+  id         String   @id @default(cuid())
+  dailyLogId String
+  dailyLog   DailyLog @relation(fields: [dailyLogId], references: [id], onDelete: Cascade)
+  startAt    DateTime
+  endAt      DateTime
+  content    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([dailyLogId, startAt])
+  @@index([dailyLogId])
 }
 
 model Break {

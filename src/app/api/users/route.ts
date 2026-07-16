@@ -11,6 +11,8 @@ const userSelect = {
   expectedDailyHours: true,
   active: true,
   createdAt: true,
+  hourModuleEnabled: true,
+  hourModuleHours: true,
 } as const;
 
 export async function GET() {
@@ -68,6 +70,12 @@ export async function POST(request: Request) {
       passwordHash,
       role: parsed.data.role,
       expectedDailyHours: parsed.data.expectedDailyHours,
+      hourModuleEnabled: parsed.data.hourModuleEnabled,
+      // Never keep an interval for a disabled module — it would silently apply
+      // if the switch were flipped back on later.
+      hourModuleHours: parsed.data.hourModuleEnabled
+        ? parsed.data.hourModuleHours ?? null
+        : null,
     },
     select: userSelect,
   });
