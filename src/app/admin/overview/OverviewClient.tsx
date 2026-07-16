@@ -14,6 +14,7 @@ import {
   Textarea,
 } from "@/components/ui";
 import { buildSlots } from "@/lib/hour-slots";
+import { Markdown } from "@/components/markdown";
 import {
   formatDate,
   formatTime,
@@ -189,8 +190,8 @@ function NoteBlock({ title, text }: { title: string; text: string }) {
       <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
       </div>
-      <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm whitespace-pre-wrap break-words text-foreground">
-        {text}
+      <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+        <Markdown>{text}</Markdown>
       </div>
     </div>
   );

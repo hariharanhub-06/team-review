@@ -14,6 +14,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { formatDate, formatTime } from "@/lib/utils";
+import { Markdown } from "@/components/markdown";
 
 export interface User {
   id: string;
@@ -43,6 +44,20 @@ interface HistoryRow {
 interface HistoryData {
   user: { id: string; name: string; email: string };
   history: HistoryRow[];
+}
+
+/** One labelled note from the member's login/logout forms, rendered as markdown. */
+function HistoryNote({ title, text }: { title: string; text: string }) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </div>
+      <div className="rounded-md border border-border bg-card px-3 py-2">
+        <Markdown>{text}</Markdown>
+      </div>
+    </div>
+  );
 }
 
 /* ---------------- Modal ---------------- */
@@ -138,6 +153,16 @@ export function UsersClient({
   const [historyLoading, setHistoryLoading] = React.useState(false);
   const [historyError, setHistoryError] = React.useState<string | null>(null);
   const [historyData, setHistoryData] = React.useState<HistoryData | null>(null);
+  // Days whose notes are expanded in the history modal.
+  const [expandedDays, setExpandedDays] = React.useState<Set<string>>(new Set());
+
+  function toggleDay(key: string) {
+    setExpandedDays((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }
 
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
 
@@ -242,6 +267,7 @@ export function UsersClient({
     setHistoryOpen(true);
     setHistoryData(null);
     setHistoryError(null);
+    setExpandedDays(new Set());
     setHistoryLoading(true);
     try {
       const res = await fetch(`/api/users/${u.id}/history`);
@@ -552,16 +578,16 @@ export function UsersClient({
               {historyData.history.length === 1 ? "day" : "days"}
             </p>
             <div className="overflow-x-auto scroll-thin">
-              <table className="w-full min-w-[760px] text-sm">
+              <table className="w-full min-w-[560px] text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-muted-foreground">
+                    <th className="w-8 px-2 py-2" />
                     <th className="px-3 py-2 font-medium">Date</th>
                     <th className="px-3 py-2 font-medium">Login</th>
                     <th className="px-3 py-2 font-medium">Logout</th>
-                    <th className="px-3 py-2 font-medium">Hours</th>
-                    <th className="px-3 py-2 font-medium">Work Hrs</th>
+                    <th className="px-3 py-2 text-right font-medium">Hours</th>
+                    <th className="px-3 py-2 text-right font-medium">Work Hrs</th>
                     <th className="px-3 py-2 font-medium">Status</th>
-                    <th className="px-3 py-2 font-medium">Work / Remarks</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -575,38 +601,94 @@ export function UsersClient({
                       </td>
                     </tr>
                   )}
-                  {historyData.history.map((h, i) => (
-                    <tr key={i} className="border-b border-border last:border-0 align-top">
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {formatDate(h.date)}
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
-                        {h.loginAt ? formatTime(h.loginAt) : "—"}
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
-                        {h.logoutAt ? formatTime(h.logoutAt) : "—"}
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap">{h.loginHours}h</td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {h.workHours}h
-                        {h.workEntriesCount > 0 && (
-                          <span className="ml-1 text-xs text-muted-foreground">
-                            ({h.workEntriesCount})
-                          </span>
+                  {historyData.history.map((h, i) => {
+                    const key = `${h.date}-${i}`;
+                    const isOpen = expandedDays.has(key);
+                    const hasNotes = !!(h.plannedWork || h.workCompleted || h.remarks);
+                    return (
+                      <React.Fragment key={key}>
+                        <tr
+                          className="cursor-pointer border-b border-border align-top hover:bg-accent/50"
+                          onClick={() => toggleDay(key)}
+                        >
+                          <td className="px-2 py-2">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleDay(key);
+                              }}
+                              aria-expanded={isOpen}
+                              aria-label={isOpen ? "Collapse details" : "Expand details"}
+                              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted"
+                            >
+                              <span
+                                className={
+                                  isOpen
+                                    ? "rotate-90 transition-transform"
+                                    : "transition-transform"
+                                }
+                              >
+                                ▶
+                              </span>
+                            </button>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 font-medium">
+                            {formatDate(h.date)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                            {h.loginAt ? formatTime(h.loginAt) : "—"}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                            {h.logoutAt ? formatTime(h.logoutAt) : "—"}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                            {h.loginHours}h
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                            {h.workHours}h
+                            {h.workEntriesCount > 0 && (
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                ({h.workEntriesCount})
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            <StatusBadge status={h.status} />
+                          </td>
+                        </tr>
+                        {isOpen && (
+                          <tr className="border-b border-border bg-muted/20">
+                            <td colSpan={7} className="px-4 py-4">
+                              {hasNotes ? (
+                                <div className="space-y-4">
+                                  {h.plannedWork && (
+                                    <HistoryNote
+                                      title="Planned Work (at login)"
+                                      text={h.plannedWork}
+                                    />
+                                  )}
+                                  {h.workCompleted && (
+                                    <HistoryNote
+                                      title="Work Completed (at logout)"
+                                      text={h.workCompleted}
+                                    />
+                                  )}
+                                  {h.remarks && (
+                                    <HistoryNote title="Remarks" text={h.remarks} />
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-muted-foreground">
+                                  No notes recorded for this day.
+                                </p>
+                              )}
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td className="px-3 py-2">
-                        <StatusBadge status={h.status} />
-                      </td>
-                      <td className="px-3 py-2 max-w-xs text-muted-foreground">
-                        {h.workCompleted && <div>{h.workCompleted}</div>}
-                        {h.remarks && (
-                          <div className="text-xs italic">{h.remarks}</div>
-                        )}
-                        {!h.workCompleted && !h.remarks && "—"}
-                      </td>
-                    </tr>
-                  ))}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
