@@ -1293,7 +1293,13 @@ export function DashboardClient({
         </Card>
       )}
 
-      {/* Project & Task Logging — today's split, edited on the Today tab only */}
+      {/* Today tab — Hours Report, when the admin enabled the hour module. */}
+      {tab === "today" && hourModuleHours !== null && (
+        <HoursReport log={log} intervalHours={hourModuleHours} now={now} />
+      )}
+
+      {/* Project & Task Logging — today's split. Sits directly above Mark Logout,
+          since the split is what the logout gate checks. */}
       {tab === "today" && (
       <Card className={!isLoggedIn ? "opacity-60" : undefined}>
         <CardHeader>
@@ -1475,11 +1481,6 @@ export function DashboardClient({
         </CardContent>
       </Card>
 
-      )}
-
-      {/* Today tab — Hours Report, when the admin enabled the hour module. */}
-      {tab === "today" && hourModuleHours !== null && (
-        <HoursReport log={log} intervalHours={hourModuleHours} now={now} />
       )}
 
       {/* Today tab — Mark Logout */}
