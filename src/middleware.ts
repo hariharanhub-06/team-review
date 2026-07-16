@@ -23,6 +23,7 @@ export async function middleware(req: NextRequest) {
   const isProtected =
     pathname.startsWith("/dashboard") || pathname.startsWith("/admin");
   const isAdminArea = pathname.startsWith("/admin");
+  const isMemberArea = pathname.startsWith("/dashboard");
 
   // Already logged in and visiting /login -> send to the right home.
   if (isAuthPage && session) {
@@ -41,6 +42,15 @@ export async function middleware(req: NextRequest) {
   if (isAdminArea && session && session.role !== "ADMIN") {
     const url = req.nextUrl.clone();
     url.pathname = "/dashboard";
+    return NextResponse.redirect(url);
+  }
+
+  // Admins have no personal member dashboard — send them to the admin home.
+  // Matters most for the PWA, whose start_url is /dashboard, so an admin who
+  // opens the installed app would otherwise land on the member pages.
+  if (isMemberArea && session && session.role === "ADMIN") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/admin";
     return NextResponse.redirect(url);
   }
 

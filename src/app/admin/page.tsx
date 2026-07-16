@@ -66,28 +66,33 @@ export default async function AdminOverviewPage() {
           label="Total Members"
           value={totalMembers}
           hint={`${totalUsers} total users`}
+          href="/admin/users"
         />
-        <StatCard label="Total Projects" value={totalProjects} />
+        <StatCard label="Total Projects" value={totalProjects} href="/admin/projects" />
         <StatCard
           label="Hours Logged"
           value={round(totals.totalHours)}
           hint="This month"
+          href="/admin/overview"
         />
         <StatCard
           label="Avg Productivity"
           value={<StarRating score={totals.avgScore} size={18} showValue />}
           hint="Team average"
+          href="/admin/analytics"
         />
         <StatCard
           label="Pending Approvals"
           value={pendingApprovals.length}
           tone={pendingApprovals.length > 0 ? "warning" : "success"}
           hint="Tasks awaiting review"
+          href="/admin/tasks"
         />
         <StatCard
           label="Overdue Tasks"
           value={taskStats.overdue}
           tone={taskStats.overdue > 0 ? "destructive" : "success"}
+          href="/admin/tasks"
         />
       </div>
 

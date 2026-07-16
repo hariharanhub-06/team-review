@@ -1,4 +1,5 @@
 import * as React from "react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 /* ---------------- Button ---------------- */
@@ -155,11 +156,14 @@ export function StatCard({
   value,
   hint,
   tone,
+  href,
 }: {
   label: string;
   value: React.ReactNode;
   hint?: string;
   tone?: "default" | "success" | "warning" | "destructive";
+  /** When set, the whole card becomes a link to this route. */
+  href?: string;
 }) {
   const toneColor =
     tone === "success"
@@ -169,13 +173,25 @@ export function StatCard({
       : tone === "destructive"
       ? "text-destructive"
       : "text-foreground";
-  return (
-    <Card className="p-5">
+  const body = (
+    <>
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className={cn("mt-1 text-2xl font-bold", toneColor)}>{value}</p>
       {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
-    </Card>
+    </>
   );
+
+  if (href) {
+    return (
+      <Card className="transition-colors hover:border-primary hover:bg-accent/50">
+        <Link href={href} className="block h-full p-5">
+          {body}
+        </Link>
+      </Card>
+    );
+  }
+
+  return <Card className="p-5">{body}</Card>;
 }
 
 /* ---------------- Star rating ---------------- */

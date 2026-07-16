@@ -7,7 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "HH Team",
     description:
       "HH Team work tracking and productivity management for engineering projects",
-    // Members land on their own dashboard; the middleware bounces admins to /admin.
+    // Members land on their own dashboard; the middleware now bounces admins
+    // from /dashboard to /admin, so this start_url is right for both roles.
     start_url: "/dashboard",
     scope: "/",
     display: "standalone",
