@@ -46,7 +46,11 @@ export default async function DashboardPage() {
     }),
     prisma.user.findUnique({
       where: { id: s.sub },
-      select: { hourModuleEnabled: true, hourModuleHours: true },
+      select: {
+        hourModuleEnabled: true,
+        hourModuleHours: true,
+        breaksEnabled: true,
+      },
     }),
   ]);
 
@@ -87,6 +91,7 @@ export default async function DashboardPage() {
       hourModuleHours={
         hourModule?.hourModuleEnabled ? hourModule.hourModuleHours ?? null : null
       }
+      breaksEnabled={hourModule?.breaksEnabled ?? true}
     />
   );
 }

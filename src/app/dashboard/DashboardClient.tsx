@@ -563,6 +563,7 @@ export function DashboardClient({
   tasks: initialTasks,
   userName,
   hourModuleHours,
+  breaksEnabled,
 }: {
   initialLog: SerializedLog | null;
   projects: SerializedProject[];
@@ -570,6 +571,8 @@ export function DashboardClient({
   userName: string;
   /** Window size in hours, or null when the hour module is off for this member. */
   hourModuleHours: number | null;
+  /** When false, break tracking is off for this member: no card, no break stats. */
+  breaksEnabled: boolean;
 }) {
   const [log, setLog] = useState<SerializedLog | null>(initialLog);
   const [tasks, setTasks] = useState<SerializedTask[]>(initialTasks);
@@ -971,16 +974,22 @@ export function DashboardClient({
             savedEntriesCount === 1 ? "entry" : "entries"
           }`}
         />
-        <StatCard
-          label="Break Time"
-          value={formatDurationPrecise(totalBreakHours)}
-          hint={`${breaks.length} ${breaks.length === 1 ? "break" : "breaks"}`}
-          tone={onBreak ? "warning" : "default"}
-        />
+        {/* A member without break tracking would only ever see "0s" here — but a day
+            that already has breaks (e.g. the switch was flipped today) still shows. */}
+        {(breaksEnabled || breaks.length > 0) && (
+          <StatCard
+            label="Break Time"
+            value={formatDurationPrecise(totalBreakHours)}
+            hint={`${breaks.length} ${breaks.length === 1 ? "break" : "breaks"}`}
+            tone={onBreak ? "warning" : "default"}
+          />
+        )}
         <StatCard
           label="Net Active"
           value={formatDurationPrecise(netActiveHours)}
-          hint={onBreak ? "on break…" : "presence − breaks"}
+          hint={
+            !breaksEnabled ? "time present" : onBreak ? "on break…" : "presence − breaks"
+          }
           tone={onBreak ? "warning" : "default"}
         />
       </div>
@@ -1164,8 +1173,10 @@ export function DashboardClient({
 
       )}
 
-      {/* Today tab — Break / Lunch tracking */}
-      {tab === "today" && isLoggedIn && !isLoggedOut && (
+      {/* Today tab — Break / Lunch tracking, when the admin enabled it. Still shown
+          while a break is open even if it was just disabled, so the member can end
+          it — logout is gated on "Back to Work". */}
+      {tab === "today" && (breaksEnabled || onBreak) && isLoggedIn && !isLoggedOut && (
         <Card className={onBreak ? "border-[hsl(var(--warning))]/50" : undefined}>
           <CardHeader>
             <CardTitle>Breaks &amp; Lunch</CardTitle>

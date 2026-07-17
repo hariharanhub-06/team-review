@@ -26,6 +26,7 @@ export interface User {
   createdAt: string;
   hourModuleEnabled: boolean;
   hourModuleHours: number | null;
+  breaksEnabled: boolean;
 }
 
 interface HistoryRow {
@@ -119,6 +120,7 @@ interface FormState {
   active: boolean;
   hourModuleEnabled: boolean;
   hourModuleHours: string;
+  breaksEnabled: boolean;
 }
 
 const emptyForm: FormState = {
@@ -130,6 +132,7 @@ const emptyForm: FormState = {
   active: true,
   hourModuleEnabled: false,
   hourModuleHours: "1",
+  breaksEnabled: true,
 };
 
 export function UsersClient({
@@ -192,6 +195,7 @@ export function UsersClient({
       active: u.active,
       hourModuleEnabled: u.hourModuleEnabled,
       hourModuleHours: u.hourModuleHours ? String(u.hourModuleHours) : "1",
+      breaksEnabled: u.breaksEnabled,
     });
     setFormError(null);
     setFormOpen(true);
@@ -212,6 +216,9 @@ export function UsersClient({
       expectedDailyHours: Number(form.expectedDailyHours),
       hourModuleEnabled,
       hourModuleHours: hourModuleEnabled ? Number(form.hourModuleHours) : null,
+      // Admins have no daily log, so the switch is moot for them — send the
+      // default rather than whatever the form happened to hold.
+      breaksEnabled: form.role === "MEMBER" ? form.breaksEnabled : true,
     };
 
     if (editing) {
@@ -350,6 +357,15 @@ export function UsersClient({
                           ⏱️ {u.hourModuleHours}h
                         </Badge>
                       )}
+                      {u.role === "MEMBER" && !u.breaksEnabled && (
+                        <Badge
+                          tone="default"
+                          className="ml-2"
+                          title="Breaks & lunch tracking is turned off for this member"
+                        >
+                          🚫 Breaks
+                        </Badge>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <Badge tone={u.active ? "success" : "destructive"}>
@@ -483,9 +499,31 @@ export function UsersClient({
             </label>
           )}
 
-          {/* Hour module — members only; an admin has no daily log to split. */}
+          {/* Per-member modules — members only; an admin has no daily log. */}
           {form.role === "MEMBER" && (
             <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+              <label className="flex items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  className="mt-0.5 h-4 w-4 rounded border-input"
+                  checked={form.breaksEnabled}
+                  onChange={(e) =>
+                    setForm({ ...form, breaksEnabled: e.target.checked })
+                  }
+                />
+                <span>
+                  <span className="font-medium">Breaks &amp; Lunch</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Lets them clock out for breaks, which are deducted from their net
+                    active time. Turning it off hides the card; breaks already recorded
+                    are kept.
+                  </span>
+                </span>
+              </label>
+
+              <div className="border-t border-border" />
+
               <label className="flex items-start gap-3 text-sm">
                 <input
                   type="checkbox"

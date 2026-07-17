@@ -6,10 +6,12 @@ export const loginSchema = z.object({
 });
 
 /**
+ * Per-member feature switches.
+ *
  * Hour module: an interval is required when the switch is on, and cleared when
  * it's off, so a disabled module can never leave a stale interval behind.
  */
-const hourModuleFields = {
+const memberModuleFields = {
   hourModuleEnabled: z.boolean().default(false),
   hourModuleHours: z.coerce
     .number()
@@ -18,6 +20,8 @@ const hourModuleFields = {
     .max(24, "Time frame must be between 1 and 24 hours")
     .nullable()
     .optional(),
+  /** Break/lunch tracking. Defaults on — it predates this switch. */
+  breaksEnabled: z.boolean().default(true),
 };
 
 const requireIntervalWhenEnabled = <T extends z.ZodTypeAny>(schema: T) =>
@@ -43,7 +47,7 @@ export const userCreateSchema = requireIntervalWhenEnabled(
     password: z.string().min(6, "Password must be at least 6 characters"),
     role: z.enum(["ADMIN", "MEMBER"]),
     expectedDailyHours: z.coerce.number().min(0).max(24).default(8),
-    ...hourModuleFields,
+    ...memberModuleFields,
   })
 );
 
@@ -55,7 +59,7 @@ export const userUpdateSchema = requireIntervalWhenEnabled(
     role: z.enum(["ADMIN", "MEMBER"]).optional(),
     expectedDailyHours: z.coerce.number().min(0).max(24).optional(),
     active: z.boolean().optional(),
-    ...hourModuleFields,
+    ...memberModuleFields,
   })
 );
 

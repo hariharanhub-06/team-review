@@ -19,6 +19,7 @@ export default async function AdminUsersPage() {
       createdAt: true,
       hourModuleEnabled: true,
       hourModuleHours: true,
+      breaksEnabled: true,
     },
     orderBy: { createdAt: "desc" },
   });

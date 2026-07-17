@@ -56,6 +56,11 @@ model User {
   /// Size of each reporting window, in whole hours (1-24). Null when disabled.
   hourModuleHours    Int?
 
+  /// When off, the member has no break/lunch tracking: the card is hidden and the
+  /// break API refuses them. Defaults on — break tracking predates this switch and
+  /// everyone had it. Existing break rows are kept, not deleted, when turned off.
+  breaksEnabled      Boolean    @default(true)
+
   dailyLogs          DailyLog[]
   assignedTasks      Task[]     @relation("TaskAssignee")
 }

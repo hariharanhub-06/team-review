@@ -13,6 +13,7 @@ const userSelect = {
   createdAt: true,
   hourModuleEnabled: true,
   hourModuleHours: true,
+  breaksEnabled: true,
 } as const;
 
 export async function GET() {
@@ -76,6 +77,7 @@ export async function POST(request: Request) {
       hourModuleHours: parsed.data.hourModuleEnabled
         ? parsed.data.hourModuleHours ?? null
         : null,
+      breaksEnabled: parsed.data.breaksEnabled,
     },
     select: userSelect,
   });

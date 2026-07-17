@@ -12,6 +12,11 @@ const bodySchema = z.object({
  * - If there is an OPEN break (endAt null) -> close it (Back to Work).
  * - Otherwise -> start a new break (Out for Break/Lunch).
  * Requires the user to have marked login and not yet marked logout.
+ *
+ * Break tracking can be switched off per member (User.breaksEnabled). That blocks
+ * STARTING a break, but never closing one: an admin can flip the switch while
+ * someone is mid-break, and refusing to close it would strand them on break — with
+ * logout gated behind "Back to Work", that would lock them out of ending their day.
  */
 export async function POST(req: Request) {
   let user;
@@ -47,8 +52,19 @@ export async function POST(req: Request) {
 
   const open = log.breaks.find((b) => b.endAt === null);
   if (open) {
+    // Always allowed — see the note above about not stranding a mid-break member.
     await prisma.break.update({ where: { id: open.id }, data: { endAt: new Date() } });
   } else {
+    const config = await prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { breaksEnabled: true },
+    });
+    if (!config?.breaksEnabled) {
+      return Response.json(
+        { error: "Break tracking isn't enabled for your account" },
+        { status: 403 }
+      );
+    }
     await prisma.break.create({
       data: { dailyLogId: log.id, type, startAt: new Date() },
     });

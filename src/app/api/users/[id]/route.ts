@@ -14,6 +14,7 @@ const userSelect = {
   createdAt: true,
   hourModuleEnabled: true,
   hourModuleHours: true,
+  breaksEnabled: true,
 } as const;
 
 export async function PATCH(
@@ -53,6 +54,7 @@ export async function PATCH(
     active,
     hourModuleEnabled,
     hourModuleHours,
+    breaksEnabled,
   } = parsed.data;
 
   const data: Prisma.UserUpdateInput = {};
@@ -67,6 +69,9 @@ export async function PATCH(
   // Turning the module off clears the interval, so it can't silently reapply later.
   data.hourModuleEnabled = hourModuleEnabled;
   data.hourModuleHours = hourModuleEnabled ? hourModuleHours ?? null : null;
+  // Turning breaks off hides the card and blocks the API, but keeps any break
+  // rows already recorded — past days must stay accurate.
+  data.breaksEnabled = breaksEnabled;
 
   try {
     const user = await prisma.user.update({
