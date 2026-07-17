@@ -4,11 +4,17 @@ import { jwtVerify } from "jose";
 const COOKIE_NAME = "twt_session";
 const encoder = new TextEncoder();
 
+function getSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error("JWT_SECRET is not set");
+  return encoder.encode(secret);
+}
+
 async function readSession(req: NextRequest) {
   const token = req.cookies.get(COOKIE_NAME)?.value;
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, encoder.encode(process.env.JWT_SECRET));
+    const { payload } = await jwtVerify(token, getSecret());
     return { role: payload.role as string, sub: payload.sub as string };
   } catch {
     return null;
