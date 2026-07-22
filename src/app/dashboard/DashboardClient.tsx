@@ -1397,6 +1397,11 @@ export function DashboardClient({
             <p className="text-sm text-muted-foreground">
               Mark login to start logging your work.
             </p>
+          ) : projects.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              You&apos;re not on any projects yet. Once an admin assigns you a task,
+              its project will appear here for logging.
+            </p>
           ) : (
             <div className="space-y-4">
               {/* Header row (desktop) */}

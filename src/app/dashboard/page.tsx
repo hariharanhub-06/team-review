@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { todayUtc } from "@/lib/utils";
 import { taskOverdue, taskHoursWorked } from "@/lib/tasks";
+import { allowedProjects } from "@/lib/member-projects";
 import { DashboardClient } from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ export default async function DashboardPage() {
 
   const date = todayUtc();
 
-  const [log, projects, assigned, myEntries, hourModule] = await Promise.all([
+  const [log, assigned, myEntries, hourModule] = await Promise.all([
     prisma.dailyLog.findUnique({
       where: { userId_date: { userId: s.sub, date } },
       include: {
@@ -24,10 +25,6 @@ export default async function DashboardPage() {
         breaks: { orderBy: { startAt: "asc" } },
         hourSlots: { orderBy: { startAt: "asc" } },
       },
-    }),
-    prisma.project.findMany({
-      orderBy: { name: "asc" },
-      select: { id: true, name: true },
     }),
     // All tasks assigned to this member (every status — the "My Tasks" panel shows all).
     prisma.task.findMany({
@@ -53,6 +50,9 @@ export default async function DashboardPage() {
       },
     }),
   ]);
+
+  // Only the projects this member is actually on — not every project in the system.
+  const projects = await allowedProjects(s.sub, log?.id);
 
   const hoursForTask = (t: { id: string; projectId: string; title: string }) =>
     taskHoursWorked(t, myEntries);
